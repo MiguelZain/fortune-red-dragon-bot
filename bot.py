@@ -23,7 +23,7 @@ STAFF_ROLE_ID = int(os.getenv("STAFF_ROLE_ID", "0"))
 DB_PATH = os.getenv("DB_PATH", "event.db")
 
 # Optional: add a thumbnail URL if you want (discord cdn / imgur / etc)
-OPEN_THUMBNAIL_URL = os.getenv("OPEN_THUMBNAIL_URL", "")
+OPEN_THUMBNAIL_URL = os.getenv("OPEN_THUMBNAIL_URL", "").strip()
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is missing. Put it in your .env file.")
