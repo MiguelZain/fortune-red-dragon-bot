@@ -23,7 +23,7 @@ STAFF_ROLE_ID = int(os.getenv("STAFF_ROLE_ID", "0"))
 DB_PATH = os.getenv("DB_PATH", "event.db")
 
 # Optional: add a thumbnail URL if you want (discord cdn / imgur / etc)
-OPEN_THUMBNAIL_URL = os.getenv("OPEN_THUMBNAIL_URL", "").strip()
+OPEN_THUMBNAIL_URL = https://media.discordapp.net/attachments/1459687857697460266/1460597301000011866/ChatGPT_Image_Jan_13_2026_01_22_22_PM.png?ex=69677ebd&is=69662d3d&hm=77940ae451e3d9fcd6af589be0a88d3e971be5be2aaf058bf8ca67280f222815&=&format=webp&quality=lossless&width=968&height=968
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is missing. Put it in your .env file.")
@@ -665,7 +665,7 @@ class EventCommands(app_commands.Group):
         )
 
         # Thumbnail (optional)
-        if OPEN_THUMBNAIL_URL:
+        if OPEN_THUMBNAIL_URL:https://media.discordapp.net/attachments/1459687857697460266/1460597301000011866/ChatGPT_Image_Jan_13_2026_01_22_22_PM.png?ex=69677ebd&is=69662d3d&hm=77940ae451e3d9fcd6af589be0a88d3e971be5be2aaf058bf8ca67280f222815&=&format=webp&quality=lossless&width=968&height=968
             embed.set_thumbnail(url=OPEN_THUMBNAIL_URL)
 
         # Better hierarchy: show reward first, then totals
