@@ -999,6 +999,7 @@ class FortuneBot(commands.Bot):
         try:
             if GUILD_ID and GUILD_ID != 0:
                 guild = discord.Object(id=GUILD_ID)
+                self.tree.copy_global_to(guild=guild)
                 synced = await self.tree.sync(guild=guild)
                 print(f"✅ Synced {len(synced)} commands to guild {GUILD_ID}")
             else:
