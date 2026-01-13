@@ -23,7 +23,7 @@ STAFF_ROLE_ID = int(os.getenv("STAFF_ROLE_ID", "0"))
 DB_PATH = os.getenv("DB_PATH", "event.db")
 
 # Optional: add a thumbnail URL if you want (discord cdn / imgur / etc)
-OPEN_THUMBNAIL_URL = https://media.discordapp.net/attachments/1459687857697460266/1460597301000011866/ChatGPT_Image_Jan_13_2026_01_22_22_PM.png #os.getenv("OPEN_THUMBNAIL_URL", "").strip()
+OPEN_THUMBNAIL_URL = os.getenv("OPEN_THUMBNAIL_URL", "").strip()
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is missing. Put it in your .env file.")
