@@ -683,8 +683,13 @@ class EventCommands(app_commands.Group):
 
         # Close the loop
         footer = "Fortune favors the consistent."
-        if envelopes2 == 0 and QUESTS_CHANNEL_ID:
-            footer = f"Out of envelopes? Head to #{interaction.guild.get_channel(QUESTS_CHANNEL_ID).name} for new missions."
+          quests_channel_name = None
+        if interaction.guild and QUESTS_CHANNEL_ID:
+            quests_channel = interaction.guild.get_channel(QUESTS_CHANNEL_ID)
+            if quests_channel:
+                quests_channel_name = quests_channel.name
+        if envelopes2 == 0 and quests_channel_name:
+            footer = f"Out of envelopes? Head to #{quests_channel_name} for new missions."
         elif envelopes2 == 0:
             footer = "You're out of envelopes—check the quests channel for new missions."
 
