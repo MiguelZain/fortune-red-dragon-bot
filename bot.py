@@ -683,7 +683,7 @@ class EventCommands(app_commands.Group):
 
         # Close the loop
         footer = "Fortune favors the consistent."
-          quests_channel_name = None
+        quests_channel_name = None
         if interaction.guild and QUESTS_CHANNEL_ID:
             quests_channel = interaction.guild.get_channel(QUESTS_CHANNEL_ID)
             if quests_channel:
