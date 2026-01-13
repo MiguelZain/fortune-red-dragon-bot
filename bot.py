@@ -991,22 +991,21 @@ class EventCommands(app_commands.Group):
 # =========================
 class FortuneBot(commands.Bot):
     async def setup_hook(self):
-        # Register the /event group ONLY once
-        if not any(cmd.name == "event" for cmd in self.tree.get_commands()):
+        # Register /event ONLY ONCE
+        if self.tree.get_command("event") is None:
             self.tree.add_command(EventCommands())
 
-        # Sync ONLY to the guild for fast dev updates (avoids global duplicates)
-        if GUILD_ID and GUILD_ID != 0:
-            guild = discord.Object(id=GUILD_ID)
-
-            # (Optional but recommended) wipe existing guild commands then resync clean
-            self.tree.clear_commands(guild=guild)
-            self.tree.add_command(EventCommands())
-            synced = await self.tree.sync(guild=guild)
-            print(f"✅ Synced {len(synced)} commands to guild {GUILD_ID}")
-        else:
-            synced = await self.tree.sync()
-            print(f"✅ Synced {len(synced)} GLOBAL commands")
+        # Sync to guild (fast)
+        try:
+            if GUILD_ID and GUILD_ID != 0:
+                guild = discord.Object(id=GUILD_ID)
+                synced = await self.tree.sync(guild=guild)
+                print(f"✅ Synced {len(synced)} commands to guild {GUILD_ID}")
+            else:
+                synced = await self.tree.sync()
+                print(f"✅ Synced {len(synced)} GLOBAL commands (may take time)")
+        except Exception as e:
+            print("Command sync failed:", e)
 
 bot = FortuneBot(command_prefix="!", intents=intents)
 
