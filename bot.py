@@ -820,7 +820,7 @@ class EventCommands(app_commands.Group):
             inline=False
         )
 
-        footer = "Fortune favors the consistent."
+        footer = ""
         if envelopes2 == 0 and QUESTS_CHANNEL_ID and interaction.guild and interaction.guild.get_channel(QUESTS_CHANNEL_ID):
             footer = f"Out of envelopes? Head to #{interaction.guild.get_channel(QUESTS_CHANNEL_ID).name} for new missions."
         elif envelopes2 == 0:
