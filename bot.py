@@ -1008,7 +1008,6 @@ class FortuneBot(commands.Bot):
             synced = await self.tree.sync()
             print(f"✅ Synced {len(synced)} GLOBAL commands")
 
-
 bot = FortuneBot(command_prefix="!", intents=intents)
 
 
