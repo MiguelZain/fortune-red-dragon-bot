@@ -1,6 +1,7 @@
 import os
 import time
 import random
+import math
 import discord
 import aiosqlite
 from discord import app_commands
@@ -22,7 +23,13 @@ LEDGER_CHANNEL_ID = int(os.getenv("LEDGER_CHANNEL_ID", "0"))
 STAFF_ROLE_ID = int(os.getenv("STAFF_ROLE_ID", "0"))
 DB_PATH = os.getenv("DB_PATH", "event.db")
 
-# Optional: add a thumbnail URL if you want (discord cdn / imgur / etc)
+# Optional: /open thumbnail URLs by tier (set these later)
+OPEN_THUMBNAIL_GREEN = os.getenv("OPEN_THUMBNAIL_GREEN", "").strip()
+OPEN_THUMBNAIL_BLUE = os.getenv("OPEN_THUMBNAIL_BLUE", "").strip()
+OPEN_THUMBNAIL_PURPLE = os.getenv("OPEN_THUMBNAIL_PURPLE", "").strip()
+OPEN_THUMBNAIL_GOLD = os.getenv("OPEN_THUMBNAIL_GOLD", "").strip()
+
+# Backwards-compatible single thumbnail (optional). If you still have it set, it'll be used only if tier thumb missing.
 OPEN_THUMBNAIL_URL = os.getenv("OPEN_THUMBNAIL_URL", "").strip()
 
 if not BOT_TOKEN:
@@ -81,7 +88,6 @@ FLAVOR = {
 # BOT SETUP
 # =========================
 intents = discord.Intents.default()
-
 open_cooldowns: dict[int, float] = {}  # user_id -> last_open_time
 
 
@@ -195,14 +201,21 @@ async def consume_envelope_and_award(user_id: int, points: int, is_dragon: bool)
         return True
 
 
-async def top_leaderboard(limit: int = 10):
+async def count_users() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM users") as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+
+
+async def top_leaderboard_page(offset: int, limit: int):
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
             SELECT user_id, points, envelopes, dragon
             FROM users
-            ORDER BY points DESC, dragon DESC, envelopes DESC
-            LIMIT ?
-        """, (int(limit),)) as cur:
+            ORDER BY points DESC, dragon DESC, envelopes DESC, user_id ASC
+            LIMIT ? OFFSET ?
+        """, (int(limit), int(offset))) as cur:
             return await cur.fetchall()
 
 
@@ -254,6 +267,66 @@ async def try_remove_envelopes(user_id: int, amount: int) -> bool:
         )
         await db.commit()
         return True
+
+
+# -------- rank helpers (exact rank + context) --------
+async def get_rank_row(user_id: int):
+    """
+    Returns dict:
+      {user_id, points, envelopes, dragon, rank, total}
+    or None if user not found (shouldn't happen because ensure_user exists in other flows).
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        await ensure_user(db, int(user_id))
+
+        # Uses SQLite window functions (SQLite 3.25+; this is standard on most modern environments)
+        async with db.execute("""
+            WITH ranked AS (
+                SELECT
+                    user_id, points, envelopes, dragon,
+                    ROW_NUMBER() OVER (ORDER BY points DESC, dragon DESC, envelopes DESC, user_id ASC) AS r,
+                    COUNT(*) OVER () AS total
+                FROM users
+            )
+            SELECT user_id, points, envelopes, dragon, r, total
+            FROM ranked
+            WHERE user_id = ?
+        """, (int(user_id),)) as cur:
+            row = await cur.fetchone()
+            if not row:
+                return None
+            return {
+                "user_id": int(row[0]),
+                "points": int(row[1]),
+                "envelopes": int(row[2]),
+                "dragon": int(row[3]),
+                "rank": int(row[4]),
+                "total": int(row[5]),
+            }
+
+
+async def get_rank_context(rank: int, around: int = 2):
+    """
+    Returns rows around rank:
+      [(rank, user_id, points, envelopes, dragon), ...]
+    """
+    start_r = max(1, int(rank) - int(around))
+    end_r = int(rank) + int(around)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            WITH ranked AS (
+                SELECT
+                    user_id, points, envelopes, dragon,
+                    ROW_NUMBER() OVER (ORDER BY points DESC, dragon DESC, envelopes DESC, user_id ASC) AS r
+                FROM users
+            )
+            SELECT r, user_id, points, envelopes, dragon
+            FROM ranked
+            WHERE r BETWEEN ? AND ?
+            ORDER BY r ASC
+        """, (int(start_r), int(end_r))) as cur:
+            return await cur.fetchall()
 
 
 # -------- quests --------
@@ -441,6 +514,23 @@ async def log_ledger(guild: discord.Guild | None, text: str):
         return
 
 
+def tier_thumbnail_for_key(key: str) -> str:
+    """
+    key is one of: 🟢 🔵 🟣 🟡
+    Returns tier-specific thumbnail if set, else falls back to OPEN_THUMBNAIL_URL, else empty.
+    """
+    mapping = {
+        "🟢": OPEN_THUMBNAIL_GREEN,
+        "🔵": OPEN_THUMBNAIL_BLUE,
+        "🟣": OPEN_THUMBNAIL_PURPLE,
+        "🟡": OPEN_THUMBNAIL_GOLD,
+    }
+    url = (mapping.get(key) or "").strip()
+    if url:
+        return url
+    return OPEN_THUMBNAIL_URL  # fallback (maybe empty)
+
+
 # =========================
 # APPROVAL VIEW (PERSISTENT)
 # =========================
@@ -529,6 +619,58 @@ class ReviewView(discord.ui.View):
         )
 
         await interaction.response.defer(ephemeral=True)
+
+
+# =========================
+# LEADERBOARD VIEW (PAGED)
+# =========================
+class LeaderboardView(discord.ui.View):
+    def __init__(self, page: int, per_page: int, max_pages: int, limit_total: int):
+        super().__init__(timeout=120)
+        self.page = int(page)
+        self.per_page = int(per_page)
+        self.max_pages = int(max_pages)
+        self.limit_total = int(limit_total)  # e.g. 100
+
+        self.prev_button.disabled = self.page <= 1
+        self.next_button.disabled = self.page >= self.max_pages
+
+    async def build_embed(self) -> discord.Embed:
+        offset = (self.page - 1) * self.per_page
+        rows = await top_leaderboard_page(offset=offset, limit=self.per_page)
+
+        start_rank = offset + 1
+        lines = []
+        for idx, (user_id, points, envelopes, dragon) in enumerate(rows):
+            rank = start_rank + idx
+            lines.append(f"**{rank}.** <@{user_id}> — **{points} pts** • 🧧{envelopes} • 🐉{dragon}")
+
+        if not lines:
+            lines = ["No data yet."]
+
+        embed = discord.Embed(
+            title="🏆 Fortune Leaderboard",
+            description="\n".join(lines),
+            color=COLOR_RED
+        )
+        embed.set_footer(text=f"Page {self.page}/{self.max_pages} • Showing Top {self.limit_total}")
+        return embed
+
+    @discord.ui.button(label="⬅ Prev", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = max(1, self.page - 1)
+        self.prev_button.disabled = self.page <= 1
+        self.next_button.disabled = self.page >= self.max_pages
+        embed = await self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Next ➡", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = min(self.max_pages, self.page + 1)
+        self.prev_button.disabled = self.page <= 1
+        self.next_button.disabled = self.page >= self.max_pages
+        embed = await self.build_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
 
 
 # =========================
@@ -649,45 +791,40 @@ class EventCommands(app_commands.Group):
 
         envelopes2, points2, dragon2 = await get_user_stats(interaction.user.id)
 
-        key = tier_name.split()[0]  # emoji token
+        key = tier_name.split()[0]  # 🟢 / 🔵 / 🟣 / 🟡
         text = random.choice(FLAVOR.get(key, ["Fortune smiles upon you."]))
 
         completed = await count_user_approved(interaction.user.id)
         progress = f"{min(completed, PARTICIPATION_GOAL)}/{PARTICIPATION_GOAL}"
 
-        # Choose color: gold for dragon tier, red otherwise
         embed_color = COLOR_GOLD if is_dragon else COLOR_RED
-
         embed = discord.Embed(
             title="🎁 Red Envelope Opened!",
             description=f"**{tier_name}**\n*{text}*",
             color=embed_color
         )
 
-        # Thumbnail (optional)
-        if OPEN_THUMBNAIL_URL:
-            embed.set_thumbnail(url=OPEN_THUMBNAIL_URL)
+        # Tier-based thumbnail
+        thumb = tier_thumbnail_for_key(key)
+        if thumb:
+            embed.set_thumbnail(url=thumb)
 
-        # Better hierarchy: show reward first, then totals
         embed.add_field(name="Reward", value=f"**+{tier_points} Fortune Points**", inline=False)
         embed.add_field(name="Total Points", value=f"**{points2}**", inline=True)
         embed.add_field(name="Dragon Marks", value=f"**{dragon2}**", inline=True)
         embed.add_field(name="Remaining Envelopes", value=f"**{envelopes2}**", inline=True)
 
-        # Progress tracker
         embed.add_field(
             name="Progress to Participation Reward",
             value=f"**{progress}** missions approved",
             inline=False
         )
 
-        # Close the loop
         footer = "Fortune favors the consistent."
-        if envelopes2 == 0 and QUESTS_CHANNEL_ID:
+        if envelopes2 == 0 and QUESTS_CHANNEL_ID and interaction.guild and interaction.guild.get_channel(QUESTS_CHANNEL_ID):
             footer = f"Out of envelopes? Head to #{interaction.guild.get_channel(QUESTS_CHANNEL_ID).name} for new missions."
         elif envelopes2 == 0:
             footer = "You're out of envelopes—check the quests channel for new missions."
-
         embed.set_footer(text=footer)
 
         await log_ledger(
@@ -730,23 +867,51 @@ class EventCommands(app_commands.Group):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    # -------- PLAYER: leaderboard --------
-    @app_commands.command(name="leaderboard", description="Top Fortune Points.")
+    # -------- PLAYER: leaderboard (paged to 100) --------
+    @app_commands.command(name="leaderboard", description="Top Fortune Points (paged).")
     async def leaderboard(self, interaction: discord.Interaction):
-        rows = await top_leaderboard(10)
-        if not rows:
+        total = await count_users()
+        if total <= 0:
             return await interaction.response.send_message("No data yet.", ephemeral=True)
 
+        limit_total = min(100, total)
+        per_page = 10
+        max_pages = max(1, math.ceil(limit_total / per_page))
+
+        view = LeaderboardView(page=1, per_page=per_page, max_pages=max_pages, limit_total=limit_total)
+        embed = await view.build_embed()
+        await interaction.response.send_message(embed=embed, view=view)
+
+    # -------- PLAYER: rank (exact rank + context) --------
+    @app_commands.command(name="rank", description="Show exact rank, totals, and nearby players.")
+    @app_commands.describe(user="Optional: check someone else's rank")
+    async def rank(self, interaction: discord.Interaction, user: discord.Member | None = None):
+        target = user or interaction.user
+
+        r = await get_rank_row(int(target.id))
+        if not r:
+            return await interaction.response.send_message("No rank data yet.", ephemeral=True)
+
+        ctx = await get_rank_context(r["rank"], around=2)
+
         lines = []
-        for i, (user_id, points, envelopes, dragon) in enumerate(rows, start=1):
-            lines.append(f"**{i}.** <@{user_id}> — **{points} pts** • 🧧{envelopes} • 🐉{dragon}")
+        for (rk, uid, pts, env, drg) in ctx:
+            marker = "➡️ " if int(uid) == int(target.id) else ""
+            lines.append(f"{marker}**#{rk}** <@{uid}> — **{pts} pts** • 🧧{env} • 🐉{drg}")
 
         embed = discord.Embed(
-            title="🏆 Fortune Leaderboard",
-            description="\n".join(lines),
+            title="📊 Fortune Rank",
+            description="\n".join(lines) if lines else "—",
             color=COLOR_RED
         )
-        await interaction.response.send_message(embed=embed)
+        embed.add_field(name="Player", value=target.mention, inline=False)
+        embed.add_field(name="Rank", value=f"**#{r['rank']} / {r['total']}**", inline=True)
+        embed.add_field(name="Points", value=f"**{r['points']}**", inline=True)
+        embed.add_field(name="Envelopes", value=f"**{r['envelopes']}**", inline=True)
+        embed.add_field(name="Dragon Marks", value=f"**{r['dragon']}**", inline=True)
+
+        embed.set_footer(text="Sorting: Points ↓, then Dragon Marks ↓, then Envelopes ↓ (ties by user_id).")
+        await interaction.response.send_message(embed=embed, ephemeral=False)
 
     # -------- STAFF: postquest --------
     @app_commands.command(name="postquest", description="(Staff) Post a quest (mission) to the quests channel.")
@@ -791,7 +956,6 @@ class EventCommands(app_commands.Group):
             else:
                 return await interaction.response.send_message("Please upload a valid image file.", ephemeral=True)
 
-        # Post message first (we'll update quest_id after we insert)
         embed = discord.Embed(
             title=f"🧧 New Quest — {title}",
             description=quest,
@@ -834,7 +998,6 @@ class EventCommands(app_commands.Group):
             channel_id=msg.channel.id
         )
 
-        # Edit message to include quest id prominently
         embed.title = f"🧧 Quest #{quest_id} — {title}"
         embed.set_footer(text=f"Quest ID: {quest_id} • Use /event submit quest_id:{quest_id}")
         await msg.edit(embed=embed)
@@ -879,11 +1042,9 @@ class EventCommands(app_commands.Group):
 
         await set_submission_status(int(submission_id), "REVOKED")
 
-        # remove exactly what was awarded (quest-based reward)
         remove_amount = int(awarded)
         removed = await try_remove_envelopes(int(user_id), remove_amount)
 
-        # Update original submission message (best-effort)
         try:
             if interaction.guild and channel_id and message_id:
                 ch = interaction.guild.get_channel(int(channel_id))
@@ -991,11 +1152,9 @@ class EventCommands(app_commands.Group):
 # =========================
 class FortuneBot(commands.Bot):
     async def setup_hook(self):
-        # Register group once
         if not any(cmd.name == "event" for cmd in self.tree.get_commands()):
             self.tree.add_command(EventCommands())
 
-        # Sync to your guild (fast updates)
         try:
             if GUILD_ID and GUILD_ID != 0:
                 guild = discord.Object(id=GUILD_ID)
