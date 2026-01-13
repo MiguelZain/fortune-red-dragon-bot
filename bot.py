@@ -683,13 +683,8 @@ class EventCommands(app_commands.Group):
 
         # Close the loop
         footer = "Fortune favors the consistent."
-        quests_channel_name = None
-        if interaction.guild and QUESTS_CHANNEL_ID:
-            quests_channel = interaction.guild.get_channel(QUESTS_CHANNEL_ID)
-            if quests_channel:
-                quests_channel_name = quests_channel.name
-        if envelopes2 == 0 and quests_channel_name:
-            footer = f"Out of envelopes? Head to #{quests_channel_name} for new missions."
+        if envelopes2 == 0 and QUESTS_CHANNEL_ID:
+            footer = f"Out of envelopes? Head to #{interaction.guild.get_channel(QUESTS_CHANNEL_ID).name} for new missions."
         elif envelopes2 == 0:
             footer = "You're out of envelopes—check the quests channel for new missions."
 
@@ -996,29 +991,23 @@ class EventCommands(app_commands.Group):
 # =========================
 class FortuneBot(commands.Bot):
     async def setup_hook(self):
-        # Always replace the /event group to avoid stale definitions
-        self.tree.remove_command("event")
-        self.tree.add_command(EventCommands())
+        # Register group once
+        if not any(cmd.name == "event" for cmd in self.tree.get_commands()):
+            self.tree.add_command(EventCommands())
 
+        # Sync to your guild (fast updates)
         try:
             if GUILD_ID and GUILD_ID != 0:
                 guild = discord.Object(id=GUILD_ID)
-
-                # Optional but recommended: clear guild commands then resync clean
-                self.tree.clear_commands(guild=guild)
-                await self.tree.sync(guild=guild)
-
-                # Now push the current tree to the guild
+                self.tree.copy_global_to(guild=guild)
                 synced = await self.tree.sync(guild=guild)
                 print(f"✅ Synced {len(synced)} commands to guild {GUILD_ID}")
             else:
-                # GLOBAL sync (slow to appear)
                 synced = await self.tree.sync()
                 print(f"✅ Synced {len(synced)} GLOBAL commands (may take time to appear)")
-        except discord.HTTPException as e:
-            print("Command sync failed:", e, getattr(e, "text", ""))
         except Exception as e:
             print("Command sync failed:", e)
+
 
 bot = FortuneBot(command_prefix="!", intents=intents)
 
