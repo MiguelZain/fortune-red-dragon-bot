@@ -987,8 +987,8 @@ class EventCommands(app_commands.Group):
         if not interaction.guild:
             return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
 
-        if reward_envelopes < 1 or reward_envelopes > 10:
-            return await interaction.response.send_message("reward_envelopes must be between 1 and 10.", ephemeral=True)
+        if reward_envelopes < 1 or reward_envelopes > 20:
+            return await interaction.response.send_message("reward_envelopes must be between 1 and 20.", ephemeral=True)
 
         ch = interaction.guild.get_channel(QUESTS_CHANNEL_ID)
         if not ch:
