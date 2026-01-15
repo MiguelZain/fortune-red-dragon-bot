@@ -17,11 +17,18 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 QUESTS_CHANNEL_ID = int(os.getenv("QUESTS_CHANNEL_ID", "0"))
-SUBMISSIONS_CHANNEL_ID = int(os.getenv("SUBMISSIONS_CHANNEL_ID", "0"))
-ENVELOPES_CHANNEL_ID = int(os.getenv("ENVELOPES_CHANNEL_ID", "0"))
+SUBMISSIONS_CHANNEL_ID = int(os.getenv("SUBMISSIONS_CHANNEL_ID", "0"))  # public "submit here" channel
+ENVELOPES_CHANNEL_ID = int(os.getenv("ENVELOPES_CHANNEL_ID", "0"))      # where /open happens
 LEDGER_CHANNEL_ID = int(os.getenv("LEDGER_CHANNEL_ID", "0"))
 STAFF_ROLE_ID = int(os.getenv("STAFF_ROLE_ID", "0"))
 DB_PATH = os.getenv("DB_PATH", "event.db")
+
+# ✅ HARD SET your requested channels (still allow .env override if you want)
+PRIVATE_SUBMISSIONS_CHANNEL_ID = int(os.getenv("PRIVATE_SUBMISSIONS_CHANNEL_ID", "1461470513649160356"))
+ENVELOPES_NOTIFY_CHANNEL_ID = int(os.getenv("ENVELOPES_NOTIFY_CHANNEL_ID", "1459674952771829812"))
+DEFAULT_LEDGER_CHANNEL_ID = 1459687857697460266
+if LEDGER_CHANNEL_ID == 0:
+    LEDGER_CHANNEL_ID = DEFAULT_LEDGER_CHANNEL_ID
 
 # Optional: /open thumbnail URLs by tier (set these later)
 OPEN_THUMBNAIL_GREEN = os.getenv("OPEN_THUMBNAIL_GREEN", "").strip()
@@ -271,15 +278,9 @@ async def try_remove_envelopes(user_id: int, amount: int) -> bool:
 
 # -------- rank helpers (exact rank + context) --------
 async def get_rank_row(user_id: int):
-    """
-    Returns dict:
-      {user_id, points, envelopes, dragon, rank, total}
-    or None if user not found (shouldn't happen because ensure_user exists in other flows).
-    """
     async with aiosqlite.connect(DB_PATH) as db:
         await ensure_user(db, int(user_id))
 
-        # Uses SQLite window functions (SQLite 3.25+; this is standard on most modern environments)
         async with db.execute("""
             WITH ranked AS (
                 SELECT
@@ -306,10 +307,6 @@ async def get_rank_row(user_id: int):
 
 
 async def get_rank_context(rank: int, around: int = 2):
-    """
-    Returns rows around rank:
-      [(rank, user_id, points, envelopes, dragon), ...]
-    """
     start_r = max(1, int(rank) - int(around))
     end_r = int(rank) + int(around)
 
@@ -448,7 +445,6 @@ async def user_has_submission_for_quest(user_id: int, quest_id: int) -> bool:
 
 
 async def count_user_approved(user_id: int) -> int:
-    """Counts approved submissions (missions completed)."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
             SELECT COUNT(*)
@@ -461,7 +457,6 @@ async def count_user_approved(user_id: int) -> int:
 
 # -------- daily claim --------
 async def can_claim_daily(user_id: int) -> tuple[bool, int]:
-    """Returns (can_claim, seconds_remaining)."""
     now = int(time.time())
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
@@ -514,11 +509,29 @@ async def log_ledger(guild: discord.Guild | None, text: str):
         return
 
 
+async def notify_envelopes_channel(guild: discord.Guild | None, user_id: int, reward: int, quest_title: str):
+    """Ping user in the public envelopes channel with a celebratory message."""
+    if guild is None or ENVELOPES_NOTIFY_CHANNEL_ID == 0:
+        return
+    ch = guild.get_channel(ENVELOPES_NOTIFY_CHANNEL_ID)
+    if not ch:
+        try:
+            ch = await guild.fetch_channel(ENVELOPES_NOTIFY_CHANNEL_ID)
+        except Exception:
+            return
+
+    lines = [
+        f"🐉✨ <@{user_id}> your deed has been **approved**!",
+        f"You have been granted **+{int(reward)} 🧧 Red Envelope(s)** for **{quest_title}**.",
+        "The Red Dragon’s fortune smiles upon you — go claim your destiny in the envelopes channel!"
+    ]
+    try:
+        await ch.send("\n".join(lines))
+    except Exception:
+        return
+
+
 def tier_thumbnail_for_key(key: str) -> str:
-    """
-    key is one of: 🟢 🔵 🟣 🟡
-    Returns tier-specific thumbnail if set, else falls back to OPEN_THUMBNAIL_URL, else empty.
-    """
     mapping = {
         "🟢": OPEN_THUMBNAIL_GREEN,
         "🔵": OPEN_THUMBNAIL_BLUE,
@@ -539,7 +552,6 @@ class ReviewView(discord.ui.View):
         super().__init__(timeout=None)
         self.submission_id = int(submission_id)
 
-        # Persistent buttons: custom_id required + no timeout
         self.approve.custom_id = f"review:approve:{self.submission_id}"
         self.reject.custom_id = f"review:reject:{self.submission_id}"
 
@@ -574,22 +586,27 @@ class ReviewView(discord.ui.View):
 
         await add_envelopes(int(user_id), reward)
         await mark_submission_award(self.submission_id, reward)
+
         await self.finalize_message(
             interaction,
             "APPROVED",
             f"✅ Approved by {interaction.user} • +{reward} 🧧 for “{q_title}”"
         )
 
-        # ledger with direct link to the submission message
+        # link to the submission message (private submissions channel)
         if interaction.guild and channel_id and message_id:
             link = msg_link(interaction.guild.id, int(channel_id), int(message_id))
         else:
             link = "(link unavailable)"
 
+        # ✅ ledger log includes staff actor
         await log_ledger(
             interaction.guild,
-            f"✅ APPROVED • Sub#{submission_id} • Quest#{quest_id} • +{reward}🧧 → <@{user_id}> • {link}"
+            f"✅ APPROVED • Sub#{submission_id} • Quest#{quest_id} • +{reward}🧧 → <@{user_id}> • by {interaction.user.mention} • {link}"
         )
+
+        # ✅ ping user publicly in envelopes-notify channel
+        await notify_envelopes_channel(interaction.guild, int(user_id), reward, q_title)
 
         await interaction.response.defer(ephemeral=True)
 
@@ -613,9 +630,10 @@ class ReviewView(discord.ui.View):
         else:
             link = "(link unavailable)"
 
+        # ✅ ledger log includes staff actor
         await log_ledger(
             interaction.guild,
-            f"❌ REJECTED • Sub#{submission_id} • Quest#{quest_id} → <@{user_id}> • {link}"
+            f"❌ REJECTED • Sub#{submission_id} • Quest#{quest_id} → <@{user_id}> • by {interaction.user.mention} • {link}"
         )
 
         await interaction.response.defer(ephemeral=True)
@@ -630,7 +648,7 @@ class LeaderboardView(discord.ui.View):
         self.page = int(page)
         self.per_page = int(per_page)
         self.max_pages = int(max_pages)
-        self.limit_total = int(limit_total)  # e.g. 100
+        self.limit_total = int(limit_total)
 
         self.prev_button.disabled = self.page <= 1
         self.next_button.disabled = self.page >= self.max_pages
@@ -681,9 +699,8 @@ async def quest_id_autocomplete(interaction: discord.Interaction, current: str):
     choices = []
     for qid, title, reward in rows:
         label = f"#{qid} • +{reward}🧧 • {title}"
-        if current.strip():
-            if current.strip().lower() not in label.lower():
-                continue
+        if current.strip() and current.strip().lower() not in label.lower():
+            continue
         choices.append(app_commands.Choice(name=label[:100], value=int(qid)))
     return choices[:25]
 
@@ -707,14 +724,18 @@ class EventCommands(app_commands.Group):
         proof: discord.Attachment,
         note: str | None = None
     ):
+        # Player must run it in the public submissions channel (keeps the flow clean)
         if interaction.channel_id != SUBMISSIONS_CHANNEL_ID:
             return await interaction.response.send_message("Use this command in the submissions channel.", ephemeral=True)
+
+        if not interaction.guild:
+            return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
 
         quest = await get_quest(int(quest_id))
         if not quest:
             return await interaction.response.send_message("That quest ID does not exist.", ephemeral=True)
 
-        _, q_title, q_body, q_bonus, q_reward, _, active, _, _ = quest
+        _, q_title, _, _, q_reward, _, active, _, _ = quest
         if int(active) != 1:
             return await interaction.response.send_message("That quest is closed.", ephemeral=True)
 
@@ -727,8 +748,19 @@ class EventCommands(app_commands.Group):
 
         await interaction.response.defer(ephemeral=True)
 
+        # Post the actual submission embed to the PRIVATE staff-only review channel
+        review_ch = interaction.guild.get_channel(PRIVATE_SUBMISSIONS_CHANNEL_ID)
+        if not review_ch:
+            try:
+                review_ch = await interaction.guild.fetch_channel(PRIVATE_SUBMISSIONS_CHANNEL_ID)
+            except Exception:
+                return await interaction.followup.send(
+                    "⚠️ I can't access the private submissions channel. Please check channel ID/permissions.",
+                    ephemeral=True
+                )
+
         embed = discord.Embed(
-            title="🧧 Quest Submission",
+            title="🧧 Quest Submission (Private Review)",
             description=(
                 f"**Quest:** #{quest_id} — **{q_title}**\n"
                 f"**Clasher:** {interaction.user.mention}\n"
@@ -750,16 +782,27 @@ class EventCommands(app_commands.Group):
         )
 
         view = ReviewView(submission_id=submission_id)
-        msg = await interaction.channel.send(embed=embed, view=view)
+
+        try:
+            msg = await review_ch.send(embed=embed, view=view)
+        except discord.Forbidden:
+            return await interaction.followup.send(
+                "⚠️ I don't have permission to post in the private submissions channel.",
+                ephemeral=True
+            )
+
         await update_submission_message(submission_id, msg.id, msg.channel.id)
 
-        link = msg_link(interaction.guild.id, msg.channel.id, msg.id) if interaction.guild else "(link unavailable)"
+        link = msg_link(interaction.guild.id, msg.channel.id, msg.id)
         await log_ledger(
             interaction.guild,
             f"📮 SUBMITTED • Sub#{submission_id} • Quest#{quest_id} • {interaction.user.mention} • {link}"
         )
 
-        await interaction.followup.send(f"✅ Submission received! ID **#{submission_id}** (pending review).", ephemeral=True)
+        await interaction.followup.send(
+            f"✅ Submission received! ID **#{submission_id}** (sent to staff review).",
+            ephemeral=True
+        )
 
     # -------- PLAYER: open --------
     @app_commands.command(name="open", description="Open 1 Red Envelope and reveal your fortune.")
@@ -774,7 +817,7 @@ class EventCommands(app_commands.Group):
             return await interaction.response.send_message(f"⏳ Slow down—try again in {wait}s.", ephemeral=True)
         open_cooldowns[interaction.user.id] = now
 
-        envelopes, points, dragon = await get_user_stats(interaction.user.id)
+        envelopes, _, _ = await get_user_stats(interaction.user.id)
         if envelopes <= 0:
             msg = "You have no Red Envelopes 🧧. Complete quests to earn more!"
             if QUESTS_CHANNEL_ID:
@@ -804,7 +847,6 @@ class EventCommands(app_commands.Group):
             color=embed_color
         )
 
-        # Tier-based thumbnail
         thumb = tier_thumbnail_for_key(key)
         if thumb:
             embed.set_thumbnail(url=thumb)
@@ -825,6 +867,9 @@ class EventCommands(app_commands.Group):
             footer = f"Out of envelopes? Head to #{interaction.guild.get_channel(QUESTS_CHANNEL_ID).name} for new missions."
         elif envelopes2 == 0:
             footer = "You're out of envelopes—check the quests channel for new missions."
+
+        # ✅ add creator credit
+        footer = (footer + " • " if footer else "") + "Developed by Neo"
         embed.set_footer(text=footer)
 
         await log_ledger(
@@ -999,11 +1044,11 @@ class EventCommands(app_commands.Group):
         )
 
         embed.title = f"🧧 Quest #{quest_id} — {title}"
-        embed.set_footer(text=f"Quest ID: {quest_id} • Use /event submit quest_id:{quest_id}")
+        embed.set_footer(text=f"Quest ID: {quest_id} • Use /event submit quest_id:{quest_id} • Developed by Neo")
         await msg.edit(embed=embed)
 
         link = msg_link(interaction.guild.id, msg.channel.id, msg.id)
-        await log_ledger(interaction.guild, f"📌 QUEST POSTED • Quest#{quest_id} • +{reward_envelopes}🧧 • {link}")
+        await log_ledger(interaction.guild, f"📌 QUEST POSTED • Quest#{quest_id} • +{reward_envelopes}🧧 • by {interaction.user.mention} • {link}")
         await interaction.followup.send(f"✅ Posted Quest **#{quest_id}** in {ch.mention}.", ephemeral=True)
 
     # -------- STAFF: closequest --------
@@ -1018,7 +1063,7 @@ class EventCommands(app_commands.Group):
             return await interaction.response.send_message("Quest not found.", ephemeral=True)
 
         await close_quest(int(quest_id))
-        await log_ledger(interaction.guild, f"🔒 QUEST CLOSED • Quest#{quest_id} by {interaction.user.mention}")
+        await log_ledger(interaction.guild, f"🔒 QUEST CLOSED • Quest#{quest_id} • by {interaction.user.mention}")
         await interaction.response.send_message(f"✅ Quest #{quest_id} closed.", ephemeral=True)
 
     # -------- STAFF: revoke --------
@@ -1069,7 +1114,7 @@ class EventCommands(app_commands.Group):
                 f"➖ Removed **{remove_amount} envelope(s)** from <@{user_id}>.\n"
                 f"Now: 🧧 **{envelopes}** | ⭐ **{points}** | 🐉 **{dragon}**"
             )
-            await log_ledger(interaction.guild, f"🧹 REVOKED • Sub#{sid} • -{remove_amount}🧧 → <@{user_id}> • {link}")
+            await log_ledger(interaction.guild, f"🧹 REVOKED • Sub#{sid} • -{remove_amount}🧧 → <@{user_id}> • by {interaction.user.mention} • {link}")
         else:
             text = (
                 f"✅ Revoked submission **#{submission_id}**.\n"
@@ -1077,7 +1122,7 @@ class EventCommands(app_commands.Group):
                 f"Please use adjust commands if needed.\n"
                 f"Now: 🧧 **{envelopes}** | ⭐ **{points}** | 🐉 **{dragon}**"
             )
-            await log_ledger(interaction.guild, f"🧹 REVOKED • Sub#{sid} • envelopes NOT removed → <@{user_id}> • {link}")
+            await log_ledger(interaction.guild, f"🧹 REVOKED • Sub#{sid} • envelopes NOT removed → <@{user_id}> • by {interaction.user.mention} • {link}")
 
         await interaction.response.send_message(text, ephemeral=True)
 
@@ -1091,7 +1136,7 @@ class EventCommands(app_commands.Group):
         before, after = await adjust_user_field(user.id, "points", amount)
         envelopes, points, dragon = await get_user_stats(user.id)
 
-        await log_ledger(interaction.guild, f"🛠️ ADJUST • points {before}->{after} (Δ{amount}) • {user.mention} by {interaction.user.mention}")
+        await log_ledger(interaction.guild, f"🛠️ ADJUST • points {before}->{after} (Δ{amount}) • {user.mention} • by {interaction.user.mention}")
         await interaction.response.send_message(
             f"✅ Points updated for {user.mention}: **{before} → {after}**\nNow: 🧧 **{envelopes}** | ⭐ **{points}** | 🐉 **{dragon}**",
             ephemeral=True
@@ -1106,7 +1151,7 @@ class EventCommands(app_commands.Group):
         before, after = await adjust_user_field(user.id, "envelopes", amount)
         envelopes, points, dragon = await get_user_stats(user.id)
 
-        await log_ledger(interaction.guild, f"🛠️ ADJUST • envelopes {before}->{after} (Δ{amount}) • {user.mention} by {interaction.user.mention}")
+        await log_ledger(interaction.guild, f"🛠️ ADJUST • envelopes {before}->{after} (Δ{amount}) • {user.mention} • by {interaction.user.mention}")
         await interaction.response.send_message(
             f"✅ Envelopes updated for {user.mention}: **{before} → {after}**\nNow: 🧧 **{envelopes}** | ⭐ **{points}** | 🐉 **{dragon}**",
             ephemeral=True
@@ -1121,7 +1166,7 @@ class EventCommands(app_commands.Group):
         before, after = await adjust_user_field(user.id, "dragon", amount)
         envelopes, points, dragon = await get_user_stats(user.id)
 
-        await log_ledger(interaction.guild, f"🛠️ ADJUST • dragon {before}->{after} (Δ{amount}) • {user.mention} by {interaction.user.mention}")
+        await log_ledger(interaction.guild, f"🛠️ ADJUST • dragon {before}->{after} (Δ{amount}) • {user.mention} • by {interaction.user.mention}")
         await interaction.response.send_message(
             f"✅ Dragon Marks updated for {user.mention}: **{before} → {after}**\nNow: 🧧 **{envelopes}** | ⭐ **{points}** | 🐉 **{dragon}**",
             ephemeral=True
@@ -1143,7 +1188,7 @@ class EventCommands(app_commands.Group):
             await db.execute("DELETE FROM daily_claims")
             await db.commit()
 
-        await log_ledger(interaction.guild, f"🧨 RESET • Event data wiped by {interaction.user.mention}")
+        await log_ledger(interaction.guild, f"🧨 RESET • Event data wiped • by {interaction.user.mention}")
         await interaction.response.send_message("✅ Event data reset complete.", ephemeral=True)
 
 
