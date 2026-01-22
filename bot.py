@@ -23,7 +23,7 @@ QUESTS_CHANNEL_ID = int(os.getenv("QUESTS_CHANNEL_ID", "0"))
 SUBMISSIONS_CHANNEL_ID = int(os.getenv("SUBMISSIONS_CHANNEL_ID", "0"))
 
 # Staff-only channel where submission EMBEDS should be POSTED
-PRIVATE_SUBMISSIONS_CHANNEL_ID = 1459675177217556663  # <-- NEW hard-coded per your request
+PRIVATE_SUBMISSIONS_CHANNEL_ID = 1461470513649160356  # <-- NEW hard-coded per your request
 
 ENVELOPES_CHANNEL_ID = int(os.getenv("ENVELOPES_CHANNEL_ID", "0"))
 LEDGER_CHANNEL_ID = int(os.getenv("LEDGER_CHANNEL_ID", "0"))
