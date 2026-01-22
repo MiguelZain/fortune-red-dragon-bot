@@ -719,8 +719,8 @@ class ReviewView(discord.ui.View):
         await self.notify_user_in_submit_channel(
             interaction.guild,
             int(user_id),
-            f"❌ **Your submission #{submission_id}** for **Quest #{quest_id} — {q_title}** was **REJECTED**. "
-            f"You can **fix it and try again** by submitting a new proof. ✅"
+            f"❌ **Your submission #{submission_id}** for **Quest #{quest_id} — {q_title}** was **Rejected**. "
+            f"You can **try again** by making a new submission, contact mods for assistance. "
         )
 
         await interaction.response.defer(ephemeral=True)
