@@ -18,7 +18,13 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 QUESTS_CHANNEL_ID = int(os.getenv("QUESTS_CHANNEL_ID", "0"))
+
+# Public channel where users RUN /event submit
 SUBMISSIONS_CHANNEL_ID = int(os.getenv("SUBMISSIONS_CHANNEL_ID", "0"))
+
+# Staff-only channel where submission EMBEDS should be POSTED
+PRIVATE_SUBMISSIONS_CHANNEL_ID = 1459675177217556663  # <-- NEW hard-coded per your request
+
 ENVELOPES_CHANNEL_ID = int(os.getenv("ENVELOPES_CHANNEL_ID", "0"))
 LEDGER_CHANNEL_ID = int(os.getenv("LEDGER_CHANNEL_ID", "0"))
 STAFF_ROLE_ID = int(os.getenv("STAFF_ROLE_ID", "0"))
@@ -546,6 +552,15 @@ def tier_thumbnail_for_key(key: str) -> str:
     return OPEN_THUMBNAIL_URL  # fallback (maybe empty)
 
 
+async def safe_send(channel: discord.abc.Messageable | None, content: str = "", embed: discord.Embed | None = None):
+    if not channel:
+        return
+    try:
+        await channel.send(content=content, embed=embed)
+    except Exception:
+        pass
+
+
 async def auto_close_loop(bot: commands.Bot):
     await bot.wait_until_ready()
     while not bot.is_closed():
@@ -568,7 +583,9 @@ async def auto_close_loop(bot: commands.Bot):
 
                         emb = msg.embeds[0]
                         emb.title = f"🔒 (CLOSED) {emb.title}"
-                        emb.set_footer(text=f"Quest auto-closed • {FOOTER_DEV}")
+                        # move status info to a field (footer must be alone)
+                        emb.add_field(name="Status", value="Auto-closed (time expired).", inline=False)
+                        emb.set_footer(text=FOOTER_DEV)
                         await msg.edit(embed=emb)
                         break
                 except Exception:
@@ -596,14 +613,25 @@ class ReviewView(discord.ui.View):
         self.approve.custom_id = f"review:approve:{self.submission_id}"
         self.reject.custom_id = f"review:reject:{self.submission_id}"
 
-    async def finalize_message(self, interaction: discord.Interaction, status: str, footer_note: str):
+    async def finalize_message(self, interaction: discord.Interaction, status: str, status_text: str):
+        # Disable buttons
         for item in self.children:
             item.disabled = True
 
         embed = interaction.message.embeds[0] if interaction.message.embeds else discord.Embed(color=COLOR_RED)
-        embed.set_footer(text=footer_note)
+
+        # Put final status in a field (footer must remain alone)
+        embed.add_field(name="Review Result", value=status_text, inline=False)
+        embed.set_footer(text=FOOTER_DEV)
+
         await interaction.message.edit(embed=embed, view=self)
         await set_submission_status(self.submission_id, status)
+
+    async def notify_user_in_submit_channel(self, guild: discord.Guild | None, user_id: int, text: str):
+        if not guild or SUBMISSIONS_CHANNEL_ID == 0:
+            return
+        submit_ch = guild.get_channel(SUBMISSIONS_CHANNEL_ID)
+        await safe_send(submit_ch, content=f"<@{user_id}> {text}")
 
     @discord.ui.button(label="Approve ✅", style=discord.ButtonStyle.success)
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -627,12 +655,14 @@ class ReviewView(discord.ui.View):
 
         await add_envelopes(int(user_id), reward)
         await mark_submission_award(self.submission_id, reward)
+
         await self.finalize_message(
             interaction,
             "APPROVED",
-            f"✅ Approved by {interaction.user} • +{reward} 🧧 for “{q_title}”"
+            f"✅ Approved by {interaction.user.mention} • +{reward} 🧧"
         )
 
+        # Ledger link points to PRIVATE staff review message (the one with the buttons)
         if interaction.guild and channel_id and message_id:
             link = msg_link(interaction.guild.id, int(channel_id), int(message_id))
         else:
@@ -641,6 +671,14 @@ class ReviewView(discord.ui.View):
         await log_ledger(
             interaction.guild,
             f"✅ APPROVED • Sub#{submission_id} • Quest#{quest_id} • +{reward}🧧 → <@{user_id}> • by {interaction.user.mention} • {link}"
+        )
+
+        # Notify user in ORIGINAL submit channel (public)
+        await self.notify_user_in_submit_channel(
+            interaction.guild,
+            int(user_id),
+            f"✅ **Your submission #{submission_id}** for **Quest #{quest_id} — {q_title}** was **APPROVED**. "
+            f"You received **+{reward} 🧧**. 🐉"
         )
 
         await interaction.response.defer(ephemeral=True)
@@ -658,7 +696,14 @@ class ReviewView(discord.ui.View):
         if status != "PENDING":
             return await interaction.response.send_message("Already reviewed.", ephemeral=True)
 
-        await self.finalize_message(interaction, "REJECTED", f"❌ Rejected by {interaction.user}")
+        quest = await get_quest(int(quest_id))
+        q_title = quest[1] if quest else "Unknown Quest"
+
+        await self.finalize_message(
+            interaction,
+            "REJECTED",
+            f"❌ Rejected by {interaction.user.mention}"
+        )
 
         if interaction.guild and channel_id and message_id:
             link = msg_link(interaction.guild.id, int(channel_id), int(message_id))
@@ -668,6 +713,14 @@ class ReviewView(discord.ui.View):
         await log_ledger(
             interaction.guild,
             f"❌ REJECTED • Sub#{submission_id} • Quest#{quest_id} → <@{user_id}> • by {interaction.user.mention} • {link}"
+        )
+
+        # Notify user in ORIGINAL submit channel (public) + encourage retry
+        await self.notify_user_in_submit_channel(
+            interaction.guild,
+            int(user_id),
+            f"❌ **Your submission #{submission_id}** for **Quest #{quest_id} — {q_title}** was **REJECTED**. "
+            f"You can **fix it and try again** by submitting a new proof. ✅"
         )
 
         await interaction.response.defer(ephemeral=True)
@@ -705,7 +758,9 @@ class LeaderboardView(discord.ui.View):
             description="\n".join(lines),
             color=COLOR_RED
         )
-        embed.set_footer(text=f"Page {self.page}/{self.max_pages} • Showing Top {self.limit_total} • {FOOTER_DEV}")
+        embed.add_field(name="Page", value=f"{self.page}/{self.max_pages}", inline=True)
+        embed.add_field(name="Scope", value=f"Top {self.limit_total}", inline=True)
+        embed.set_footer(text=FOOTER_DEV)
         return embed
 
     @discord.ui.button(label="⬅ Prev", style=discord.ButtonStyle.secondary)
@@ -759,8 +814,12 @@ class EventCommands(app_commands.Group):
         proof: discord.Attachment,
         note: str | None = None
     ):
+        # Users must run it in the PUBLIC submit channel
         if interaction.channel_id != SUBMISSIONS_CHANNEL_ID:
             return await interaction.response.send_message("Use this command in the submissions channel.", ephemeral=True)
+
+        if not interaction.guild:
+            return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
 
         quest = await get_quest(int(quest_id))
         if not quest:
@@ -775,22 +834,28 @@ class EventCommands(app_commands.Group):
 
         already = await user_has_submission_for_quest(interaction.user.id, int(quest_id))
         if already:
-            return await interaction.response.send_message("You already submitted for that quest (pending/approved).", ephemeral=True)
+            return await interaction.response.send_message(
+                "You already submitted for that quest (pending/approved).",
+                ephemeral=True
+            )
 
         await interaction.response.defer(ephemeral=True)
 
+        # Build STAFF-ONLY embed
         embed = discord.Embed(
-            title="🧧 Quest Submission",
+            title="🧧 Quest Submission (Staff Review)",
             description=(
                 f"**Quest:** #{quest_id} — **{q_title}**\n"
                 f"**Clasher:** {interaction.user.mention}\n"
+                f"**User ID:** `{interaction.user.id}`\n"
                 f"**Reward (on approval):** +{int(q_reward)} 🧧"
             ),
             color=COLOR_RED
         )
         embed.add_field(name="Note", value=note if note else "—", inline=False)
+        embed.add_field(name="Status", value="PENDING", inline=False)
         embed.set_image(url=proof.url)
-        embed.set_footer(text=f"Status: PENDING • {FOOTER_DEV}")
+        embed.set_footer(text=FOOTER_DEV)
 
         submission_id = await insert_submission(
             user_id=interaction.user.id,
@@ -802,16 +867,31 @@ class EventCommands(app_commands.Group):
         )
 
         view = ReviewView(submission_id=submission_id)
-        msg = await interaction.channel.send(embed=embed, view=view)
+
+        # Send the submission to the PRIVATE staff channel
+        private_ch = interaction.guild.get_channel(PRIVATE_SUBMISSIONS_CHANNEL_ID)
+        if not private_ch:
+            # fallback: if private channel is not accessible, don't lose the submission
+            await log_ledger(interaction.guild, "⚠️ WARNING: Private submissions channel not found or not accessible.")
+            return await interaction.followup.send(
+                "⚠️ I couldn't access the staff review channel. Please contact staff/admin to fix permissions.",
+                ephemeral=True
+            )
+
+        msg = await private_ch.send(embed=embed, view=view)
         await update_submission_message(submission_id, msg.id, msg.channel.id)
 
-        link = msg_link(interaction.guild.id, msg.channel.id, msg.id) if interaction.guild else "(link unavailable)"
+        link = msg_link(interaction.guild.id, msg.channel.id, msg.id)
         await log_ledger(
             interaction.guild,
             f"📮 SUBMITTED • Sub#{submission_id} • Quest#{quest_id} • {interaction.user.mention} • {link}"
         )
 
-        await interaction.followup.send(f"✅ Submission received! ID **#{submission_id}** (pending review).", ephemeral=True)
+        # Keep the receipt PRIVATE to the user (in the channel they submitted from)
+        await interaction.followup.send(
+            f"✅ Submission received! ID **#{submission_id}** (pending review).",
+            ephemeral=True
+        )
 
     # -------- PLAYER: open --------
     @app_commands.command(name="open", description="Open 1 Red Envelope and reveal your fortune.")
@@ -864,20 +944,20 @@ class EventCommands(app_commands.Group):
         embed.add_field(name="Total Points", value=f"**{points2}**", inline=True)
         embed.add_field(name="Dragon Marks", value=f"**{dragon2}**", inline=True)
         embed.add_field(name="Remaining Envelopes", value=f"**{envelopes2}**", inline=True)
-
         embed.add_field(
             name="Progress to Participation Reward",
             value=f"**{progress}** missions approved",
             inline=False
         )
 
-        footer = FOOTER_DEV
-        if envelopes2 == 0 and QUESTS_CHANNEL_ID and interaction.guild and interaction.guild.get_channel(QUESTS_CHANNEL_ID):
-            footer = f"Out of envelopes? Head to #{interaction.guild.get_channel(QUESTS_CHANNEL_ID).name} for new missions • {FOOTER_DEV}"
-        elif envelopes2 == 0:
-            footer = f"You're out of envelopes—check the quests channel for new missions • {FOOTER_DEV}"
+        if envelopes2 == 0 and QUESTS_CHANNEL_ID:
+            embed.add_field(
+                name="Tip",
+                value=f"Out of envelopes? Head to <#{QUESTS_CHANNEL_ID}> for new missions.",
+                inline=False
+            )
 
-        embed.set_footer(text=footer)
+        embed.set_footer(text=FOOTER_DEV)
 
         await log_ledger(
             interaction.guild,
@@ -963,7 +1043,12 @@ class EventCommands(app_commands.Group):
         embed.add_field(name="Envelopes", value=f"**{r['envelopes']}**", inline=True)
         embed.add_field(name="Dragon Marks", value=f"**{r['dragon']}**", inline=True)
 
-        embed.set_footer(text=f"Sorting: Points ↓, then Dragon Marks ↓, then Envelopes ↓ (ties by user_id). • {FOOTER_DEV}")
+        embed.add_field(
+            name="Sorting",
+            value="Points ↓, then Dragon Marks ↓, then Envelopes ↓ (ties by user_id).",
+            inline=False
+        )
+        embed.set_footer(text=FOOTER_DEV)
         await interaction.response.send_message(embed=embed, ephemeral=False)
 
     # -------- STAFF: postquest (with optional duration) --------
@@ -1048,6 +1133,8 @@ class EventCommands(app_commands.Group):
         if image_url:
             embed.set_image(url=image_url)
 
+        embed.set_footer(text=FOOTER_DEV)
+
         await interaction.response.defer(ephemeral=True)
 
         try:
@@ -1073,10 +1160,10 @@ class EventCommands(app_commands.Group):
         )
 
         embed.title = f"🧧 Quest #{quest_id} — {title}"
+        embed.add_field(name="Quest ID", value=str(quest_id), inline=True)
         if expires_at:
-            embed.set_footer(text=f"Quest ID: {quest_id} • Auto-closes: {dur_val} • {FOOTER_DEV}")
-        else:
-            embed.set_footer(text=f"Quest ID: {quest_id} • {FOOTER_DEV}")
+            embed.add_field(name="Auto-Close", value=dur_val, inline=True)
+        embed.set_footer(text=FOOTER_DEV)
 
         await msg.edit(embed=embed)
 
@@ -1130,7 +1217,8 @@ class EventCommands(app_commands.Group):
                     msg = await ch.fetch_message(int(message_id))
                     if msg and msg.embeds:
                         emb = msg.embeds[0]
-                        emb.set_footer(text=f"⚠️ REVOKED by {interaction.user} • {FOOTER_DEV}")
+                        emb.add_field(name="Status", value=f"⚠️ REVOKED by {interaction.user.mention}", inline=False)
+                        emb.set_footer(text=FOOTER_DEV)
                         await msg.edit(embed=emb, view=None)
         except Exception:
             pass
