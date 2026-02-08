@@ -1174,7 +1174,7 @@ async def postquest(
     embed.add_field(name="Reward", value=f"**+{reward_envelopes} 🧧** (on approval)", inline=False)
 
     if bonus:
-        embed.add_field(name="🌟 Bonus (Optional)", value=bonus, inline=False)
+        embed.add_field(name="", value=bonus, inline=False)
 
     embed.add_field(
         name="📮 How to Submit",
