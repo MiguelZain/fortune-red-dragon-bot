@@ -30,6 +30,12 @@ LEDGER_CHANNEL_ID = int(os.getenv("LEDGER_CHANNEL_ID", "0"))
 STAFF_ROLE_ID = int(os.getenv("STAFF_ROLE_ID", "0"))
 DB_PATH = os.getenv("DB_PATH", "event.db")
 
+# Neo-only /reset owner
+OWNER_USER_ID = 736938613903720458
+
+# Role to ping + self-assign
+RED_DRAGON_HUNTERS_ROLE_ID = 1470440988748156992
+
 # Optional: /open thumbnail URLs by tier (set these later)
 OPEN_THUMBNAIL_GREEN = os.getenv("OPEN_THUMBNAIL_GREEN", "").strip()
 OPEN_THUMBNAIL_BLUE = os.getenv("OPEN_THUMBNAIL_BLUE", "").strip()
@@ -47,7 +53,6 @@ if not BOT_TOKEN:
 # =========================
 OPEN_COOLDOWN_SECONDS = 10
 DAILY_COOLDOWN_SECONDS = 6 * 60 * 60  # 6 hours
-DAILY_ENVELOPES_AWARD = 1
 
 PARTICIPATION_GOAL = 7  # "Participation Reward" threshold (approved missions)
 
@@ -62,6 +67,7 @@ TIERS = [
 # Colors (CNY vibe)
 COLOR_RED = 0xEE1C25
 COLOR_GOLD = 0xFFD700
+COLOR_GRAY = 0x808080  # for closed quests
 
 FOOTER_DEV = "Developed by Neo"
 
@@ -97,6 +103,9 @@ FLAVOR = {
 # BOT SETUP
 # =========================
 intents = discord.Intents.default()
+# NOTE: role assignment via /role works best if Members Intent is enabled in Dev Portal too.
+intents.members = True
+
 open_cooldowns: dict[int, float] = {}  # user_id -> last_open_time
 
 
@@ -579,6 +588,67 @@ def guild_only():
     return lambda x: x
 
 
+def mark_quest_embed_closed(embed: discord.Embed, reason: str):
+    # Avoid duplicating Status field if closed twice
+    existing = [f for f in embed.fields if f.name.strip().lower() != "status"]
+    embed.clear_fields()
+    for f in existing:
+        embed.add_field(name=f.name, value=f.value, inline=f.inline)
+
+    # Title formatting
+    t = (embed.title or "").strip()
+    upper = t.upper()
+    if "CLOSED" not in upper:
+        embed.title = f"🔒 CLOSED • {t}" if t else "🔒 CLOSED"
+    else:
+        if not t.startswith("🔒"):
+            embed.title = f"🔒 {t}"
+
+    # Gray color + footer
+    embed.colour = COLOR_GRAY
+    embed.add_field(name="Status", value=reason, inline=False)
+    embed.set_footer(text="Quest Closed")
+    return embed
+
+
+async def try_edit_quest_message_closed(bot: commands.Bot, quest_id: int, reason: str):
+    q = await get_quest(int(quest_id))
+    if not q:
+        return False
+
+    _, q_title, _, _, _, _, _, message_id, channel_id, _, _ = q
+    if not message_id or not channel_id:
+        return False
+
+    # Try every guild the bot is in (usually 1)
+    for g in bot.guilds:
+        ch = g.get_channel(int(channel_id))
+        if not ch:
+            continue
+        try:
+            msg = await ch.fetch_message(int(message_id))
+        except Exception:
+            continue
+
+        if not msg:
+            continue
+
+        if msg.embeds:
+            emb = msg.embeds[0]
+        else:
+            emb = discord.Embed(title=f"🧧 Quest #{quest_id} — {q_title}", color=COLOR_GRAY)
+
+        emb = mark_quest_embed_closed(emb, reason=reason)
+
+        try:
+            await msg.edit(embed=emb)
+            return True
+        except Exception:
+            return False
+
+    return False
+
+
 async def auto_close_loop(bot: commands.Bot):
     await bot.wait_until_ready()
     while not bot.is_closed():
@@ -589,22 +659,13 @@ async def auto_close_loop(bot: commands.Bot):
             for (quest_id, title, message_id, channel_id, expires_at) in expired:
                 await close_quest(int(quest_id))
 
-                # Try to edit the original quest message to show CLOSED (best-effort)
+                # Edit the original quest message to show CLOSED (best-effort)
                 try:
-                    for g in bot.guilds:
-                        ch = g.get_channel(int(channel_id)) if channel_id else None
-                        if not ch:
-                            continue
-                        msg = await ch.fetch_message(int(message_id)) if message_id else None
-                        if not msg or not msg.embeds:
-                            continue
-
-                        emb = msg.embeds[0]
-                        emb.title = f"🔒 (CLOSED) {emb.title}"
-                        emb.add_field(name="Status", value="Auto-closed (time expired).", inline=False)
-                        emb.set_footer(text=FOOTER_DEV)
-                        await msg.edit(embed=emb)
-                        break
+                    await try_edit_quest_message_closed(
+                        bot,
+                        quest_id=int(quest_id),
+                        reason="Auto-closed (time expired)."
+                    )
                 except Exception:
                     pass
 
@@ -1022,13 +1083,17 @@ async def daily(interaction: discord.Interaction):
         mins = max(1, remaining // 60)
         return await interaction.response.send_message(f"⏳ Daily not ready. Try again in ~{mins} min.", ephemeral=True)
 
+    # RNG distribution:
+    # 40% -> 1, 30% -> 2, 20% -> 3, 10% -> 4
+    awarded = random.choices([1, 2, 3, 4], weights=[40, 30, 20, 10], k=1)[0]
+
     await set_daily_claim(interaction.user.id)
-    await add_envelopes(interaction.user.id, DAILY_ENVELOPES_AWARD)
+    await add_envelopes(interaction.user.id, awarded)
 
     envelopes, points, dragon = await get_user_stats(interaction.user.id)
-    await log_ledger(interaction.guild, f"🧧 DAILY • {interaction.user.mention} claimed +{DAILY_ENVELOPES_AWARD}🧧")
+    await log_ledger(interaction.guild, f"🧧 DAILY • {interaction.user.mention} claimed +{awarded}🧧")
     await interaction.response.send_message(
-        f"✅ You claimed **+{DAILY_ENVELOPES_AWARD} 🧧**.\nNow: 🧧 **{envelopes}** | ⭐ **{points}** | 🐉 **{dragon}**",
+        f"✅ You claimed **+{awarded} 🧧**.\nNow: 🧧 **{envelopes}** | ⭐ **{points}** | 🐉 **{dragon}**",
         ephemeral=True
     )
 
@@ -1106,6 +1171,32 @@ async def rank(interaction: discord.Interaction, user: discord.Member | None = N
     await interaction.response.send_message(embed=embed, ephemeral=False)
 
 
+# -------- PLAYER: role --------
+@bot.tree.command(name="role", description="Get the RedDragonHunters role.")
+@guild_only()
+async def role(interaction: discord.Interaction):
+    if not interaction.guild:
+        return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+
+    role_obj = interaction.guild.get_role(RED_DRAGON_HUNTERS_ROLE_ID)
+    if not role_obj:
+        return await interaction.response.send_message("Role not found. Ask staff to check the role ID.", ephemeral=True)
+
+    if not isinstance(interaction.user, discord.Member):
+        return await interaction.response.send_message("Could not resolve your member object. Try again.", ephemeral=True)
+
+    try:
+        if role_obj in interaction.user.roles:
+            return await interaction.response.send_message("✅ You already have the role.", ephemeral=True)
+
+        await interaction.user.add_roles(role_obj, reason="Self-assign via /role")
+        await interaction.response.send_message(f"✅ Role granted: {role_obj.mention}", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message("⚠️ I don't have permission to give that role.", ephemeral=True)
+    except discord.HTTPException:
+        await interaction.response.send_message("⚠️ Discord error while assigning the role. Try again.", ephemeral=True)
+
+
 # -------- STAFF: postquest --------
 @bot.tree.command(name="postquest", description="(Staff) Post a quest (mission) to the quests channel.")
 @guild_only()
@@ -1120,7 +1211,7 @@ async def rank(interaction: discord.Interaction, user: discord.Member | None = N
 )
 @app_commands.choices(duration=[
     app_commands.Choice(name="No auto-close", value="none"),
-    app_commands.Choice(name="6 hours", value="6h"),
+    app_commands.Choice(name="12 hours", value="12h"),
     app_commands.Choice(name="24 hours", value="24h"),
     app_commands.Choice(name="7 days", value="7d"),
 ])
@@ -1159,8 +1250,8 @@ async def postquest(
 
     dur_val = duration.value if duration else "none"
     expires_at = None
-    if dur_val == "6h":
-        expires_at = int(time.time()) + 6 * 60 * 60
+    if dur_val == "12h":
+        expires_at = int(time.time()) + 12 * 60 * 60
     elif dur_val == "24h":
         expires_at = int(time.time()) + 24 * 60 * 60
     elif dur_val == "7d":
@@ -1196,8 +1287,10 @@ async def postquest(
 
     await interaction.response.defer(ephemeral=True)
 
+    # Ping role OUTSIDE the embed in the same message
+    ping_text = f"<@&{RED_DRAGON_HUNTERS_ROLE_ID}>"
     try:
-        msg = await ch.send(embed=embed)
+        msg = await ch.send(content=ping_text, embed=embed)
     except discord.Forbidden:
         return await interaction.followup.send("I don't have permission to post in the quests channel.", ephemeral=True)
 
@@ -1244,6 +1337,14 @@ async def closequest(interaction: discord.Interaction, quest_id: int):
         return await interaction.response.send_message("Quest not found.", ephemeral=True)
 
     await close_quest(int(quest_id))
+
+    # Auto-edit quest embed when manually closed
+    await try_edit_quest_message_closed(
+        bot,
+        quest_id=int(quest_id),
+        reason=f"Manually closed by {interaction.user.mention}."
+    )
+
     await log_ledger(interaction.guild, f"🔒 QUEST CLOSED • Quest#{quest_id} by {interaction.user.mention}")
     await interaction.response.send_message(f"✅ Quest #{quest_id} closed.", ephemeral=True)
 
@@ -1363,13 +1464,15 @@ async def adjustdragon(interaction: discord.Interaction, user: discord.Member, a
     )
 
 
-# -------- STAFF: reset --------
-@bot.tree.command(name="reset", description="(Staff) Reset ALL event data (DANGEROUS).")
+# -------- STAFF/OWNER: reset --------
+@bot.tree.command(name="reset", description="(DANGEROUS) Reset ALL event data.")
 @guild_only()
 @app_commands.describe(confirm="Type: CONFIRM")
 async def reset(interaction: discord.Interaction, confirm: str):
-    if not is_staff(interaction.user):
-        return await interaction.response.send_message("Staff only.", ephemeral=True)
+    # Neo-only even if staff
+    if int(interaction.user.id) != int(OWNER_USER_ID):
+        return await interaction.response.send_message("you are not neo!", ephemeral=True)
+
     if confirm != "CONFIRM":
         return await interaction.response.send_message("Type **CONFIRM** to reset.", ephemeral=True)
 
