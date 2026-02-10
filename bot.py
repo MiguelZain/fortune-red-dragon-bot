@@ -1174,35 +1174,27 @@ async def rank(interaction: discord.Interaction, user: discord.Member | None = N
 # -------- PLAYER: role --------
 @bot.tree.command(name="role", description="Get the RedDragonHunters role.")
 @guild_only()
-async def role_cmd(interaction: discord.Interaction):
-    # Acknowledge instantly to avoid "Unknown interaction"
-    try:
-        await interaction.response.defer(ephemeral=True)
-    except Exception:
-        # If it's already acknowledged, we'll just use followup
-        pass
-
+async def role(interaction: discord.Interaction):
     if not interaction.guild:
-        return await interaction.followup.send("Server only.", ephemeral=True)
+        return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
 
-    role = interaction.guild.get_role(RED_DRAGON_ROLE_ID)
-    if not role:
-        return await interaction.followup.send("Role not found.", ephemeral=True)
+    role_obj = interaction.guild.get_role(RED_DRAGON_HUNTERS_ROLE_ID)
+    if not role_obj:
+        return await interaction.response.send_message("Role not found. Ask staff to check the role ID.", ephemeral=True)
 
     if not isinstance(interaction.user, discord.Member):
-        return await interaction.followup.send("Could not identify you as a server member.", ephemeral=True)
-
-    if role in interaction.user.roles:
-        return await interaction.followup.send("You already have the role ✅", ephemeral=True)
+        return await interaction.response.send_message("Could not resolve your member object. Try again.", ephemeral=True)
 
     try:
-        await interaction.user.add_roles(role, reason="User used /role")
-    except discord.Forbidden:
-        return await interaction.followup.send("I don't have permission to give roles.", ephemeral=True)
-    except Exception:
-        return await interaction.followup.send("Failed to add role (unexpected error).", ephemeral=True)
+        if role_obj in interaction.user.roles:
+            return await interaction.response.send_message("✅ You already have the role.", ephemeral=True)
 
-    return await interaction.followup.send(f"✅ Granted {role.mention}", ephemeral=True)
+        await interaction.user.add_roles(role_obj, reason="Self-assign via /role")
+        await interaction.response.send_message(f"✅ Role granted: {role_obj.mention}", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message("⚠️ I don't have permission to give that role.", ephemeral=True)
+    except discord.HTTPException:
+        await interaction.response.send_message("⚠️ Discord error while assigning the role. Try again.", ephemeral=True)
 
 # -------- STAFF: postquest --------
 @bot.tree.command(name="postquest", description="(Staff) Post a quest (mission) to the quests channel.")
