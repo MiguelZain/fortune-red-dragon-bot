@@ -833,6 +833,11 @@ class LeaderboardView(discord.ui.View):
         )
         embed.add_field(name="Page", value=f"{self.page}/{self.max_pages}", inline=True)
         embed.add_field(name="Scope", value=f"Top {self.limit_total}", inline=True)
+        embed.add_field(
+        name="Sorting",
+        value="Points ↓, then Dragon Marks ↓, then Envelopes ↓ (ties by user_id).",
+        inline=False
+        )
         embed.set_footer(text=FOOTER_DEV)
         return embed
 
@@ -1162,11 +1167,6 @@ async def rank(interaction: discord.Interaction, user: discord.Member | None = N
     embed.add_field(name="Points", value=f"**{r['points']}**", inline=True)
     embed.add_field(name="Envelopes", value=f"**{r['envelopes']}**", inline=True)
     embed.add_field(name="Dragon Marks", value=f"**{r['dragon']}**", inline=True)
-    embed.add_field(
-        name="Sorting",
-        value="Points ↓, then Dragon Marks ↓, then Envelopes ↓ (ties by user_id).",
-        inline=False
-    )
     embed.set_footer(text=FOOTER_DEV)
     await interaction.response.send_message(embed=embed, ephemeral=False)
 
