@@ -1070,8 +1070,6 @@ async def open_cmd(interaction: discord.Interaction):
             inline=False
         )
 
-    embed.set_footer(text=FOOTER_DEV)
-
     await log_ledger(
         interaction.guild,
         f"🎁 OPENED • {interaction.user.mention} → {tier_name} (+{tier_points} pts) • envelopes now {envelopes2}"
@@ -1099,7 +1097,7 @@ async def daily(interaction: discord.Interaction):
     await log_ledger(interaction.guild, f"🧧 DAILY • {interaction.user.mention} claimed +{awarded}🧧")
     await interaction.response.send_message(
         f"✅ You claimed **+{awarded} 🧧**.\nNow: 🧧 **{envelopes}** | ⭐ **{points}** | 🐉 **{dragon}**",
-        ephemeral=True
+        ephemeral=False
     )
 
 
@@ -1118,7 +1116,6 @@ async def balance(interaction: discord.Interaction):
         value=f"{min(completed, PARTICIPATION_GOAL)}/{PARTICIPATION_GOAL} approved missions",
         inline=False
     )
-    embed.set_footer(text=FOOTER_DEV)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -1167,7 +1164,6 @@ async def rank(interaction: discord.Interaction, user: discord.Member | None = N
     embed.add_field(name="Points", value=f"**{r['points']}**", inline=True)
     embed.add_field(name="Envelopes", value=f"**{r['envelopes']}**", inline=True)
     embed.add_field(name="Dragon Marks", value=f"**{r['dragon']}**", inline=True)
-    embed.set_footer(text=FOOTER_DEV)
     await interaction.response.send_message(embed=embed, ephemeral=False)
 
 
@@ -1190,7 +1186,7 @@ async def role(interaction: discord.Interaction):
             return await interaction.response.send_message("✅ You already have the role.", ephemeral=True)
 
         await interaction.user.add_roles(role_obj, reason="Self-assign via /role")
-        await interaction.response.send_message(f"✅ Role granted: {role_obj.mention}", ephemeral=True)
+        await interaction.response.send_message(f"✅ Role granted: {role_obj.mention}", ephemeral=False)
     except discord.Forbidden:
         await interaction.response.send_message("⚠️ I don't have permission to give that role.", ephemeral=True)
     except discord.HTTPException:
