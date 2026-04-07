@@ -9,6 +9,7 @@ import aiosqlite
 from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
+from dataclasses import dataclass
 
 load_dotenv()
 
@@ -20,25 +21,138 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 QUESTS_CHANNEL_ID = int(os.getenv("QUESTS_CHANNEL_ID", "0"))
 SUBMISSIONS_CHANNEL_ID = int(os.getenv("SUBMISSIONS_CHANNEL_ID", "0"))
-PRIVATE_SUBMISSIONS_CHANNEL_ID = 1461470513649160356  # hard-coded per your request
+PRIVATE_SUBMISSIONS_CHANNEL_ID = int(os.getenv("PRIVATE_SUBMISSIONS_CHANNEL_ID", "1461470513649160356"))
 ENVELOPES_CHANNEL_ID = int(os.getenv("ENVELOPES_CHANNEL_ID", "0"))
 LEDGER_CHANNEL_ID = int(os.getenv("LEDGER_CHANNEL_ID", "0"))
 STAFF_ROLE_ID = int(os.getenv("STAFF_ROLE_ID", "0"))
 DB_PATH = os.getenv("DB_PATH", "event.db")
-OWNER_USER_ID = 736938613903720458
+OWNER_USER_ID = int(os.getenv("OWNER_USER_ID", "736938613903720458"))
+EVENT_ROLE_ID = int(os.getenv("EVENT_ROLE_ID", "1470440988748156992"))
+EVENT_THEME = os.getenv("EVENT_THEME", "easter").strip().lower()
 
-# Keep existing role ID for compatibility. You can change it later without touching the rest of the code.
-EVENT_ROLE_ID = 1470440988748156992
-
-# Optional thumbnails for /open by tier (still works if you keep old env names)
-OPEN_THUMBNAIL_GREEN = os.getenv("OPEN_THUMBNAIL_GREEN", "").strip()
-OPEN_THUMBNAIL_BLUE = os.getenv("OPEN_THUMBNAIL_BLUE", "").strip()
-OPEN_THUMBNAIL_PURPLE = os.getenv("OPEN_THUMBNAIL_PURPLE", "").strip()
-OPEN_THUMBNAIL_GOLD = os.getenv("OPEN_THUMBNAIL_GOLD", "").strip()
+# Generic thumbnail env names with backward-compatible fallbacks.
+OPEN_THUMBNAIL_COMMON = os.getenv("OPEN_THUMBNAIL_COMMON", os.getenv("OPEN_THUMBNAIL_GREEN", "")).strip()
+OPEN_THUMBNAIL_UNCOMMON = os.getenv("OPEN_THUMBNAIL_UNCOMMON", os.getenv("OPEN_THUMBNAIL_BLUE", "")).strip()
+OPEN_THUMBNAIL_RARE = os.getenv("OPEN_THUMBNAIL_RARE", os.getenv("OPEN_THUMBNAIL_PURPLE", "")).strip()
+OPEN_THUMBNAIL_SPECIAL = os.getenv("OPEN_THUMBNAIL_SPECIAL", os.getenv("OPEN_THUMBNAIL_GOLD", "")).strip()
 OPEN_THUMBNAIL_URL = os.getenv("OPEN_THUMBNAIL_URL", "").strip()
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is missing. Put it in your .env file.")
+
+
+@dataclass(frozen=True)
+class TierDefinition:
+    key: str
+    label: str
+    weight: int
+    points: int
+    grants_special: bool = False
+
+
+@dataclass(frozen=True)
+class EventProfile:
+    key: str
+    display_name: str
+    footer_text: str
+    entry_title: str
+    welcome_title: str
+    submission_title: str
+    open_title: str
+    claim_title: str
+    balance_title: str
+    leaderboard_title: str
+    rank_title: str
+    quest_post_prefix: str
+    event_emoji: str
+    points_emoji: str
+    item_emoji: str
+    special_emoji: str
+    quest_emoji: str
+    helper_emoji: str
+    blossom_emoji: str
+    item_singular: str
+    item_plural: str
+    points_label: str
+    special_singular: str
+    special_plural: str
+    primary_color: int
+    highlight_color: int
+    neutral_color: int
+    success_color: int
+    tiers: tuple[TierDefinition, ...]
+    flavor: dict[str, list[str]]
+
+
+def build_easter_profile() -> EventProfile:
+    return EventProfile(
+        key="easter",
+        display_name="Easter",
+        footer_text="Developed by Neo",
+        entry_title="🐣 Easter Entry Required",
+        welcome_title="🌸 Welcome to the Easter Event",
+        submission_title="🐣 Easter Quest Submission (Staff Review)",
+        open_title="🎁 Blessed Egg Opened!",
+        claim_title="🐣 Easter Claim Received",
+        balance_title="🐣 Your Easter Basket",
+        leaderboard_title="🏆 Easter Basket Leaderboard",
+        rank_title="📊 Easter Rank",
+        quest_post_prefix="🐇 New Easter Quest",
+        event_emoji="🐣",
+        points_emoji="🐤",
+        item_emoji="🥚",
+        special_emoji="🌸",
+        quest_emoji="🐇",
+        helper_emoji="🐰",
+        blossom_emoji="🌸",
+        item_singular="Blessed Egg",
+        item_plural="Blessed Eggs",
+        points_label="Spring Points",
+        special_singular="Golden Blossom",
+        special_plural="Golden Blossoms",
+        primary_color=0xFF7AA2,
+        highlight_color=0xFFD700,
+        neutral_color=0x808080,
+        success_color=0x7ED957,
+        tiers=(
+            TierDefinition("common", "🥚 Meadow Egg", 55, 1, False),
+            TierDefinition("uncommon", "🐤 Spring Nest", 30, 2, False),
+            TierDefinition("rare", "🐇 Blossom Relic", 12, 4, False),
+            TierDefinition("special", "🌸 Golden Blossom", 3, 8, True),
+        ),
+        flavor={
+            "common": [
+                "A soft spring blessing settles into your basket.",
+                "A little Easter luck finds its way to you.",
+                "A quiet egg of promise glows in the morning light.",
+                "Even the smallest blessing can brighten the whole trail.",
+            ],
+            "uncommon": [
+                "Your basket grows warmer with fresh spring joy.",
+                "A brighter blessing hops gently onto your path.",
+                "Festival cheer follows you with a better reward.",
+                "A lively little spark of Easter fortune joins your basket.",
+            ],
+            "rare": [
+                "A rare spring relic answers your dedication.",
+                "The Easter trail opens and something precious appears.",
+                "A blossom-touched reward lands softly in your hands.",
+                "This is no ordinary find—the season clearly favors you.",
+            ],
+            "special": [
+                "A golden blossom opens in your hands—the season has chosen you.",
+                "A radiant bloom crowns your basket with Easter light.",
+                "The spring festival answers you with a golden sign.",
+                "A rare blossom shines with the brightest blessing of the trail.",
+            ],
+        },
+    )
+
+
+EVENT_PROFILES = {
+    "easter": build_easter_profile(),
+}
+EVENT = EVENT_PROFILES.get(EVENT_THEME, EVENT_PROFILES["easter"])
 
 # =========================
 # EVENT SETTINGS
@@ -48,48 +162,30 @@ CLAIM_COOLDOWN_SECONDS = 6 * 60 * 60  # 6 hours
 MILESTONE_TARGET = 7
 MILESTONE_STEPS = [3, 5, 7, 10, 15]
 
-TIERS = [
-    ("🟢 Meadow Egg", 55, 1),
-    ("🔵 Spring Basket", 30, 2),
-    ("🟣 Dawn Relic", 12, 4),
-    ("🟡 Golden Crest", 3, 8),  # also grants a crest
-]
+TIERS = EVENT.tiers
+COLOR_PINK = EVENT.primary_color
+COLOR_GOLD = EVENT.highlight_color
+COLOR_GRAY = EVENT.neutral_color
+COLOR_GREEN = EVENT.success_color
 
-COLOR_PINK = 0xFF7AA2
-COLOR_GOLD = 0xFFD700
-COLOR_GRAY = 0x808080
-COLOR_GREEN = 0x7ED957
+FOOTER_DEV = EVENT.footer_text
+EVENT_EMOJI = EVENT.event_emoji
+POINTS_EMOJI = EVENT.points_emoji
+EGG_EMOJI = EVENT.item_emoji
+SPECIAL_EMOJI = EVENT.special_emoji
+FLAVOR = EVENT.flavor
 
-FOOTER_DEV = "Developed by Neo"
-EGG_EMOJI = "🥚"
-CREST_EMOJI = "🌟"
 
-FLAVOR = {
-    "🟢": [
-        "Morning dew settles on your basket, and a gentle blessing follows.",
-        "A small spring omen finds its way to you.",
-        "A quiet egg of fortune glows with fresh dawn light.",
-        "The meadow stirs—small blessings are often the first to arrive.",
-    ],
-    "🔵": [
-        "Your spring basket grows heavier with promise.",
-        "Festival bells echo—fortune now walks beside you.",
-        "A brighter blessing blooms among the lilies.",
-        "The dawn breeze carries a stronger gift to your path.",
-    ],
-    "🟣": [
-        "A relic of dawn answers your devotion.",
-        "The sky blushes violet as a rare blessing unfolds.",
-        "A sacred bloom opens—fortune rises with it.",
-        "This is no ordinary blessing; the season clearly favors you.",
-    ],
-    "🟡": [
-        "A Golden Crest shines in your hands—the season has marked you.",
-        "The festival crown turns toward you, and its blessing is absolute.",
-        "A radiant crest breaks through the dawn like sunlight through stained glass.",
-        "The Easter vigil answers you with a golden sign.",
-    ],
-}
+def item_name(amount: int | None = None) -> str:
+    return EVENT.item_singular if amount == 1 else EVENT.item_plural
+
+
+def special_name(amount: int | None = None) -> str:
+    return EVENT.special_singular if amount == 1 else EVENT.special_plural
+
+
+def format_stat_bar(items: int, points: int, special_tokens: int) -> str:
+    return f"{EGG_EMOJI} **{items}** | {POINTS_EMOJI} **{points}** | {SPECIAL_EMOJI} **{special_tokens}**"
 
 # =========================
 # BOT SETUP
@@ -127,10 +223,10 @@ def msg_link(guild_id: int, channel_id: int, message_id: int) -> str:
 
 def tier_thumbnail_for_key(key: str) -> str:
     mapping = {
-        "🟢": OPEN_THUMBNAIL_GREEN,
-        "🔵": OPEN_THUMBNAIL_BLUE,
-        "🟣": OPEN_THUMBNAIL_PURPLE,
-        "🟡": OPEN_THUMBNAIL_GOLD,
+        "common": OPEN_THUMBNAIL_COMMON,
+        "uncommon": OPEN_THUMBNAIL_UNCOMMON,
+        "rare": OPEN_THUMBNAIL_RARE,
+        "special": OPEN_THUMBNAIL_SPECIAL,
     }
     url = (mapping.get(key) or "").strip()
     return url or OPEN_THUMBNAIL_URL
@@ -200,7 +296,7 @@ async def ensure_participation_ready(interaction: discord.Interaction) -> bool:
     role_obj = interaction.guild.get_role(EVENT_ROLE_ID) if interaction.guild else None
     role_name = role_obj.mention if role_obj else "the event role"
     embed = discord.Embed(
-        title="🐣 Easter Entry Required",
+        title=EVENT.entry_title,
         description=(
             f"You need {role_name} before joining the event.") if role_obj else "You need the event role before joining the event.",
         color=COLOR_PINK,
@@ -222,6 +318,12 @@ async def ensure_participation_ready(interaction: discord.Interaction) -> bool:
 # =========================
 # DB HELPERS
 # =========================
+async def table_has_column(db: aiosqlite.Connection, table: str, column: str) -> bool:
+    async with db.execute(f"PRAGMA table_info({table})") as cur:
+        rows = await cur.fetchall()
+    return any(row[1] == column for row in rows)
+
+
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
@@ -230,7 +332,7 @@ async def init_db():
                 user_id INTEGER PRIMARY KEY,
                 envelopes INTEGER NOT NULL DEFAULT 0,
                 points INTEGER NOT NULL DEFAULT 0,
-                dragon INTEGER NOT NULL DEFAULT 0
+                special_tokens INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -310,6 +412,7 @@ async def init_db():
 
         # Safe migrations for existing databases
         migration_statements = [
+            "ALTER TABLE users ADD COLUMN special_tokens INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE quests ADD COLUMN expires_at INTEGER",
             "ALTER TABLE submissions ADD COLUMN igg_id TEXT",
             "ALTER TABLE submissions ADD COLUMN review_note TEXT",
@@ -319,6 +422,23 @@ async def init_db():
         for stmt in migration_statements:
             try:
                 await db.execute(stmt)
+            except Exception:
+                pass
+
+        # Backward-compatible migration from the legacy dragon column.
+        has_legacy_special = await table_has_column(db, "users", "dragon")
+        has_generic_special = await table_has_column(db, "users", "special_tokens")
+        if has_legacy_special and has_generic_special:
+            try:
+                await db.execute(
+                    """
+                    UPDATE users
+                    SET special_tokens = CASE
+                        WHEN COALESCE(special_tokens, 0) = 0 THEN COALESCE(dragon, 0)
+                        ELSE special_tokens
+                    END
+                    """
+                )
             except Exception:
                 pass
 
@@ -338,7 +458,7 @@ async def init_db():
 
 async def ensure_user(db: aiosqlite.Connection, user_id: int):
     await db.execute(
-        "INSERT OR IGNORE INTO users(user_id, envelopes, points, dragon) VALUES (?, 0, 0, 0)",
+        "INSERT OR IGNORE INTO users(user_id, envelopes, points, special_tokens) VALUES (?, 0, 0, 0)",
         (user_id,),
     )
 
@@ -357,7 +477,7 @@ async def get_user_stats(user_id: int) -> tuple[int, int, int]:
     async with aiosqlite.connect(DB_PATH) as db:
         await ensure_user(db, user_id)
         async with db.execute(
-            "SELECT envelopes, points, dragon FROM users WHERE user_id = ?",
+            "SELECT envelopes, points, special_tokens FROM users WHERE user_id = ?",
             (int(user_id),),
         ) as cur:
             row = await cur.fetchone()
@@ -381,7 +501,7 @@ async def consume_envelope_and_award(user_id: int, points: int, is_crest: bool) 
         )
         if is_crest:
             await db.execute(
-                "UPDATE users SET dragon = dragon + 1 WHERE user_id = ?",
+                "UPDATE users SET special_tokens = special_tokens + 1 WHERE user_id = ?",
                 (int(user_id),),
             )
         await db.commit()
@@ -396,7 +516,7 @@ async def count_users() -> int:
 
 
 async def adjust_user_field(user_id: int, field: str, delta: int) -> tuple[int, int]:
-    if field not in ("envelopes", "points", "dragon"):
+    if field not in ("envelopes", "points", "special_tokens"):
         raise ValueError("Invalid field")
 
     async with aiosqlite.connect(DB_PATH) as db:
@@ -764,14 +884,14 @@ async def get_rank_row(user_id: int):
                     u.user_id,
                     u.points,
                     u.envelopes,
-                    u.dragon,
+                    u.special_tokens,
                     COALESCE(a.approved_count, 0) AS approved_count,
-                    ROW_NUMBER() OVER (ORDER BY u.points DESC, u.dragon DESC, u.envelopes DESC, u.user_id ASC) AS r,
+                    ROW_NUMBER() OVER (ORDER BY u.points DESC, u.special_tokens DESC, u.envelopes DESC, u.user_id ASC) AS r,
                     COUNT(*) OVER () AS total
                 FROM users u
                 LEFT JOIN approved a ON a.user_id = u.user_id
             )
-            SELECT user_id, points, envelopes, dragon, approved_count, r, total
+            SELECT user_id, points, envelopes, special_tokens, approved_count, r, total
             FROM ranked
             WHERE user_id = ?
             """,
@@ -784,7 +904,7 @@ async def get_rank_row(user_id: int):
                 "user_id": int(row[0]),
                 "points": int(row[1]),
                 "envelopes": int(row[2]),
-                "dragon": int(row[3]),
+                "special_tokens": int(row[3]),
                 "approved_count": int(row[4]),
                 "rank": int(row[5]),
                 "total": int(row[6]),
@@ -809,13 +929,13 @@ async def get_rank_context(rank: int, around: int = 2):
                     u.user_id,
                     u.points,
                     u.envelopes,
-                    u.dragon,
+                    u.special_tokens,
                     COALESCE(a.approved_count, 0) AS approved_count,
-                    ROW_NUMBER() OVER (ORDER BY u.points DESC, u.dragon DESC, u.envelopes DESC, u.user_id ASC) AS r
+                    ROW_NUMBER() OVER (ORDER BY u.points DESC, u.special_tokens DESC, u.envelopes DESC, u.user_id ASC) AS r
                 FROM users u
                 LEFT JOIN approved a ON a.user_id = u.user_id
             )
-            SELECT r, user_id, points, envelopes, dragon, approved_count
+            SELECT r, user_id, points, envelopes, special_tokens, approved_count
             FROM ranked
             WHERE r BETWEEN ? AND ?
             ORDER BY r ASC
@@ -835,10 +955,10 @@ async def top_leaderboard_page(offset: int, limit: int):
                 WHERE status = 'APPROVED'
                 GROUP BY user_id
             )
-            SELECT u.user_id, u.points, u.envelopes, u.dragon, COALESCE(a.approved_count, 0) AS approved_count
+            SELECT u.user_id, u.points, u.envelopes, u.special_tokens, COALESCE(a.approved_count, 0) AS approved_count
             FROM users u
             LEFT JOIN approved a ON a.user_id = u.user_id
-            ORDER BY u.points DESC, u.dragon DESC, u.envelopes DESC, u.user_id ASC
+            ORDER BY u.points DESC, u.special_tokens DESC, u.envelopes DESC, u.user_id ASC
             LIMIT ? OFFSET ?
             """,
             (int(limit), int(offset)),
@@ -875,11 +995,11 @@ async def get_milestone_page(offset: int, limit: int):
                 WHERE status = 'APPROVED'
                 GROUP BY user_id
             )
-            SELECT u.user_id, COALESCE(a.approved_count, 0) AS approved_count, u.points, u.envelopes, u.dragon
+            SELECT u.user_id, COALESCE(a.approved_count, 0) AS approved_count, u.points, u.envelopes, u.special_tokens
             FROM users u
             JOIN approved a ON a.user_id = u.user_id
             WHERE a.approved_count >= ?
-            ORDER BY a.approved_count DESC, u.points DESC, u.dragon DESC, u.envelopes DESC, u.user_id ASC
+            ORDER BY a.approved_count DESC, u.points DESC, u.special_tokens DESC, u.envelopes DESC, u.user_id ASC
             LIMIT ? OFFSET ?
             """,
             (MILESTONE_TARGET, int(limit), int(offset)),
@@ -1189,22 +1309,22 @@ class LeaderboardView(discord.ui.View):
         rows = await top_leaderboard_page(offset=offset, limit=self.per_page)
         start_rank = offset + 1
         lines = []
-        for idx, (user_id, points, envelopes, crests, approved_count) in enumerate(rows):
+        for idx, (user_id, points, envelopes, special_tokens, approved_count) in enumerate(rows):
             rank = start_rank + idx
             lines.append(
-                f"**{rank}.** <@{user_id}> — **{points} pts** • ✅ {approved_count} quests • {EGG_EMOJI}{envelopes} • {CREST_EMOJI}{crests}"
+                f"**{rank}.** <@{user_id}> — **{points} pts** • ✅ {approved_count} quests • {EGG_EMOJI}{envelopes} • {SPECIAL_EMOJI}{special_tokens}"
             )
         if not lines:
             lines = ["No data yet."]
 
         embed = discord.Embed(
-            title="🏆 Easter Fortune Leaderboard",
+            title=EVENT.leaderboard_title,
             description="\n".join(lines),
             color=COLOR_PINK,
         )
         embed.add_field(name="Page", value=f"{self.page}/{self.max_pages}", inline=True)
         embed.add_field(name="Scope", value=f"Top {self.limit_total}", inline=True)
-        embed.add_field(name="Sorting", value="Points ↓, then Golden Crests ↓, then Blessed Eggs ↓.", inline=False)
+        embed.add_field(name="Sorting", value=f"Points ↓, then {special_name()} ↓, then {item_name()} ↓.", inline=False)
         embed.set_footer(text=FOOTER_DEV)
         return embed
 
@@ -1238,10 +1358,10 @@ class MilestoneView(discord.ui.View):
         rows = await get_milestone_page(offset=offset, limit=self.per_page)
         lines = []
         start_rank = offset + 1
-        for idx, (user_id, approved_count, points, envelopes, crests) in enumerate(rows):
+        for idx, (user_id, approved_count, points, envelopes, special_tokens) in enumerate(rows):
             rank = start_rank + idx
             lines.append(
-                f"**{rank}.** <@{user_id}> — **{approved_count} approved** • **{points} pts** • {EGG_EMOJI}{envelopes} • {CREST_EMOJI}{crests}"
+                f"**{rank}.** <@{user_id}> — **{approved_count} approved** • **{points} pts** • {EGG_EMOJI}{envelopes} • {SPECIAL_EMOJI}{special_tokens}"
             )
 
         embed = discord.Embed(
@@ -1286,7 +1406,7 @@ async def quest_id_autocomplete(_interaction: discord.Interaction, current: str)
 # =========================
 # BOT CLASS
 # =========================
-class FortuneBot(commands.Bot):
+class EventBot(commands.Bot):
     async def setup_hook(self):
         try:
             if GUILD_ID and GUILD_ID != 0:
@@ -1300,7 +1420,7 @@ class FortuneBot(commands.Bot):
             print("Command sync failed:", e)
 
 
-bot = FortuneBot(command_prefix="!", intents=intents)
+bot = EventBot(command_prefix="!", intents=intents)
 
 # =========================
 # PLAYER COMMANDS
@@ -1371,7 +1491,7 @@ async def submit(
     await interaction.response.defer(ephemeral=True)
 
     embed = discord.Embed(
-        title="🐣 Easter Quest Submission (Staff Review)",
+        title=EVENT.submission_title,
         description=(
             f"**Quest:** #{quest_id} — **{q_title}**\n"
             f"**Clasher:** {interaction.user.mention}\n"
@@ -1420,7 +1540,7 @@ async def submit(
     await interaction.followup.send(f"✅ Submission received! ID **#{submission_id}** (pending review).", ephemeral=True)
 
 
-@bot.tree.command(name="open", description="Open 1 Blessed Egg and reveal your Easter fortune.")
+@bot.tree.command(name="open", description=f"Open 1 {EVENT.item_singular} and reveal your seasonal reward.")
 @guild_only()
 async def open_cmd(interaction: discord.Interaction):
     if interaction.channel_id != ENVELOPES_CHANNEL_ID:
@@ -1436,47 +1556,48 @@ async def open_cmd(interaction: discord.Interaction):
         return await interaction.response.send_message(f"⏳ Slow down—try again in {wait}s.", ephemeral=True)
     open_cooldowns[interaction.user.id] = now
 
-    envelopes, points, crests = await get_user_stats(interaction.user.id)
+    envelopes, points, special_tokens = await get_user_stats(interaction.user.id)
     if envelopes <= 0:
-        msg = f"You have no Blessed Eggs {EGG_EMOJI}. Use **`/claim`** every **6 hours** to collect **1-4 {EGG_EMOJI}**, and check the quest channel for more."
+        msg = f"You have no {item_name()} {EGG_EMOJI}. Use **`/claim`** every **6 hours** to collect **1-4 {EGG_EMOJI}**, and check the quest channel for more."
         if QUESTS_CHANNEL_ID:
             msg += f"\nQuest board: <#{QUESTS_CHANNEL_ID}>"
         return await interaction.response.send_message(msg, ephemeral=True)
 
-    weights = [t[1] for t in TIERS]
-    tier_name, _weight, tier_points = random.choices(TIERS, weights=weights, k=1)[0]
-    is_crest = tier_name.startswith("🟡")
+    tier = random.choices(TIERS, weights=[t.weight for t in TIERS], k=1)[0]
+    tier_name = tier.label
+    tier_points = tier.points
+    grants_special = tier.grants_special
 
-    ok = await consume_envelope_and_award(interaction.user.id, tier_points, is_crest)
+    ok = await consume_envelope_and_award(interaction.user.id, tier_points, grants_special)
     if not ok:
-        return await interaction.response.send_message(f"You have no Blessed Eggs {EGG_EMOJI}.", ephemeral=True)
+        return await interaction.response.send_message(f"You have no {item_name()} {EGG_EMOJI}.", ephemeral=True)
 
-    envelopes2, points2, crests2 = await get_user_stats(interaction.user.id)
-    key = tier_name.split()[0]
-    text = random.choice(FLAVOR.get(key, ["Fortune smiles upon you."]))
+    envelopes2, points2, special_tokens2 = await get_user_stats(interaction.user.id)
+    key = tier.key
+    text = random.choice(FLAVOR.get(key, ["A soft seasonal blessing finds its way to you."]))
     completed = await count_user_approved(interaction.user.id)
     milestone_summary, milestone_ladder = build_milestone_progress(completed)
 
     embed = discord.Embed(
-        title="🎁 Blessed Egg Opened!",
+        title=EVENT.open_title,
         description=f"**{tier_name}**\n*{text}*",
-        color=COLOR_GOLD if is_crest else COLOR_PINK,
+        color=COLOR_GOLD if grants_special else COLOR_PINK,
     )
     thumb = tier_thumbnail_for_key(key)
     if thumb:
         embed.set_thumbnail(url=thumb)
 
-    embed.add_field(name="Reward", value=f"**+{tier_points} Fortune Points**", inline=False)
+    embed.add_field(name="Reward", value=f"**+{tier_points} {EVENT.points_label}**", inline=False)
     embed.add_field(name="Total Points", value=f"**{points2}**", inline=True)
-    embed.add_field(name="Golden Crests", value=f"**{crests2}**", inline=True)
-    embed.add_field(name="Remaining Blessed Eggs", value=f"**{envelopes2}**", inline=True)
+    embed.add_field(name=special_name(), value=f"**{special_tokens2}**", inline=True)
+    embed.add_field(name=f"Remaining {item_name()}", value=f"**{envelopes2}**", inline=True)
     embed.add_field(name="Milestone Progress", value=f"{milestone_summary}\n{milestone_ladder}", inline=False)
 
     if envelopes2 == 0:
-        tip = f"You used your last Blessed Egg. Use **`/claim`** every **6 hours** to collect **1-4 {EGG_EMOJI}**."
+        tip = f"You used your last {item_name(1)}. Use **`/claim`** every **6 hours** to collect **1-4 {EGG_EMOJI}**."
         if QUESTS_CHANNEL_ID:
             tip += f"\nAlso keep checking <#{QUESTS_CHANNEL_ID}> for quests."
-        embed.add_field(name="Out of Eggs?", value=tip, inline=False)
+        embed.add_field(name=f"Out of {item_name()}?", value=tip, inline=False)
 
     await log_ledger(
         interaction.guild,
@@ -1485,7 +1606,7 @@ async def open_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="claim", description="Claim free Blessed Eggs (6h cooldown, 1-4 eggs).")
+@bot.tree.command(name="claim", description=f"Claim free {EVENT.item_plural} (6h cooldown, 1-4 eggs).")
 @guild_only()
 async def claim(interaction: discord.Interaction):
     if not await ensure_participation_ready(interaction):
@@ -1502,37 +1623,37 @@ async def claim(interaction: discord.Interaction):
     await set_claim_time(interaction.user.id)
     await add_envelopes(interaction.user.id, awarded)
 
-    envelopes, points, crests = await get_user_stats(interaction.user.id)
+    envelopes, points, special_tokens = await get_user_stats(interaction.user.id)
     await log_ledger(interaction.guild, f"🥚 CLAIM • {interaction.user.mention} claimed +{awarded}{EGG_EMOJI}")
 
-    embed = discord.Embed(title="🐣 Easter Claim Received", color=COLOR_GREEN)
+    embed = discord.Embed(title=EVENT.claim_title, color=COLOR_GREEN)
     embed.description = f"You claimed **+{awarded} {EGG_EMOJI}**."
-    embed.add_field(name="Blessed Eggs", value=str(envelopes), inline=True)
-    embed.add_field(name="Fortune Points", value=str(points), inline=True)
-    embed.add_field(name="Golden Crests", value=str(crests), inline=True)
+    embed.add_field(name=item_name(), value=str(envelopes), inline=True)
+    embed.add_field(name=EVENT.points_label, value=str(points), inline=True)
+    embed.add_field(name=special_name(), value=str(special_tokens), inline=True)
     embed.add_field(name="Next Claim", value="In **6 hours**", inline=False)
     embed.set_footer(text=FOOTER_DEV)
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="balance", description="Check your Blessed Eggs, points, and milestones.")
+@bot.tree.command(name="balance", description=f"Check your {EVENT.item_plural.lower()}, {EVENT.points_label.lower()}, and milestones.")
 @guild_only()
 async def balance(interaction: discord.Interaction):
-    envelopes, points, crests = await get_user_stats(interaction.user.id)
+    envelopes, points, special_tokens = await get_user_stats(interaction.user.id)
     completed = await count_user_approved(interaction.user.id)
     milestone_summary, milestone_ladder = build_milestone_progress(completed)
 
-    embed = discord.Embed(title="🐣 Your Easter Fortune", color=COLOR_PINK)
-    embed.add_field(name="Blessed Eggs", value=str(envelopes), inline=True)
-    embed.add_field(name="Fortune Points", value=str(points), inline=True)
-    embed.add_field(name="Golden Crests", value=str(crests), inline=True)
+    embed = discord.Embed(title=EVENT.balance_title, color=COLOR_PINK)
+    embed.add_field(name=item_name(), value=str(envelopes), inline=True)
+    embed.add_field(name=EVENT.points_label, value=str(points), inline=True)
+    embed.add_field(name=special_name(), value=str(special_tokens), inline=True)
     embed.add_field(name="Approved Quests", value=str(completed), inline=True)
     embed.add_field(name="Milestone Progress", value=f"{milestone_summary}\n{milestone_ladder}", inline=False)
     embed.set_footer(text=FOOTER_DEV)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@bot.tree.command(name="leaderboard", description="Top Easter Fortune rankings.")
+@bot.tree.command(name="leaderboard", description=f"Top {EVENT.display_name} {EVENT.points_label.lower()} rankings.")
 @guild_only()
 async def leaderboard(interaction: discord.Interaction):
     total = await count_users()
@@ -1557,19 +1678,19 @@ async def rank(interaction: discord.Interaction, user: discord.Member | None = N
 
     ctx = await get_rank_context(r["rank"], around=2)
     lines = []
-    for (rk, uid, pts, env, crests, approved_count) in ctx:
+    for (rk, uid, pts, env, special_tokens, approved_count) in ctx:
         marker = "➡️ " if int(uid) == int(target.id) else ""
         lines.append(
-            f"{marker}**#{rk}** <@{uid}> — **{pts} pts** • ✅ {approved_count} • {EGG_EMOJI}{env} • {CREST_EMOJI}{crests}"
+            f"{marker}**#{rk}** <@{uid}> — **{pts} pts** • ✅ {approved_count} • {EGG_EMOJI}{env} • {SPECIAL_EMOJI}{special_tokens}"
         )
 
     milestone_summary, milestone_ladder = build_milestone_progress(r["approved_count"])
-    embed = discord.Embed(title="📊 Easter Rank", description="\n".join(lines) if lines else "—", color=COLOR_PINK)
+    embed = discord.Embed(title=EVENT.rank_title, description="\n".join(lines) if lines else "—", color=COLOR_PINK)
     embed.add_field(name="Player", value=target.mention, inline=False)
     embed.add_field(name="Rank", value=f"**#{r['rank']} / {r['total']}**", inline=True)
     embed.add_field(name="Points", value=f"**{r['points']}**", inline=True)
-    embed.add_field(name="Blessed Eggs", value=f"**{r['envelopes']}**", inline=True)
-    embed.add_field(name="Golden Crests", value=f"**{r['dragon']}**", inline=True)
+    embed.add_field(name=item_name(), value=f"**{r['envelopes']}**", inline=True)
+    embed.add_field(name=special_name(), value=f"**{r['special_tokens']}**", inline=True)
     embed.add_field(name="Approved Quests", value=f"**{r['approved_count']}**", inline=True)
     embed.add_field(name="Milestone Progress", value=f"{milestone_summary}\n{milestone_ladder}", inline=False)
     embed.set_footer(text=FOOTER_DEV)
@@ -1592,7 +1713,7 @@ async def milestone(interaction: discord.Interaction):
     await interaction.response.send_message(embed=await view.build_embed(), view=view)
 
 
-@bot.tree.command(name="role", description="Claim the Easter event role and unlock event participation.")
+@bot.tree.command(name="role", description=f"Claim the {EVENT.display_name} event role and unlock event participation.")
 @guild_only()
 async def role(interaction: discord.Interaction):
     if not interaction.guild:
@@ -1615,17 +1736,17 @@ async def role(interaction: discord.Interaction):
             return await interaction.response.send_message("⚠️ Discord error while assigning the role. Try again.", ephemeral=True)
 
     embed = discord.Embed(
-        title="🌸 Welcome to the Easter Event",
+        title=EVENT.welcome_title,
         description=(
-            f"You now hold {role_obj.mention}. The spring path is open to you."
+            f"You now hold {role_obj.mention}. The Easter trail is open to you."
             if not already_has else
-            f"You already hold {role_obj.mention}. The spring path is still open to you."
+            f"You already hold {role_obj.mention}. The Easter trail is still open to you."
         ),
         color=COLOR_GREEN,
     )
     embed.add_field(
         name="Unlocked",
-        value="**`/claim`** for free eggs every 6 hours\n**`/submit`** for quest entries\n**`/open`** to reveal your fortune",
+        value=f"**`/claim`** for free {item_name().lower()} every 6 hours\n**`/submit`** for quest entries\n**`/open`** to reveal your reward",
         inline=False,
     )
     embed.add_field(
@@ -1654,7 +1775,7 @@ async def myigg(interaction: discord.Interaction):
 @app_commands.describe(
     title="Quest title (short and clear)",
     quest="Quest instructions (full text)",
-    reward_envelopes="How many Blessed Eggs this quest grants on approval",
+    reward_items=f"How many {EVENT.item_plural} this quest grants on approval",
     bonus="Optional bonus text (purely informational)",
     image="Optional image/banner for the quest",
     pin="Pin the quest message",
@@ -1670,7 +1791,7 @@ async def postquest(
     interaction: discord.Interaction,
     title: str,
     quest: str,
-    reward_envelopes: int = 1,
+    reward_items: int = 1,
     bonus: str | None = None,
     image: discord.Attachment | None = None,
     pin: bool = False,
@@ -1685,8 +1806,8 @@ async def postquest(
     if not interaction.guild:
         return await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
 
-    if reward_envelopes < 1 or reward_envelopes > 100:
-        return await interaction.response.send_message("reward_envelopes must be between 1 and 100.", ephemeral=True)
+    if reward_items < 1 or reward_items > 100:
+        return await interaction.response.send_message("reward_items must be between 1 and 100.", ephemeral=True)
 
     ch = interaction.guild.get_channel(QUESTS_CHANNEL_ID)
     if not ch:
@@ -1708,8 +1829,8 @@ async def postquest(
     elif dur_val == "7d":
         expires_at = int(time.time()) + 7 * 24 * 60 * 60
 
-    embed = discord.Embed(title=f"🐣 New Easter Quest — {title}", description=quest, color=COLOR_PINK)
-    embed.add_field(name="Reward", value=f"**+{reward_envelopes} {EGG_EMOJI}** (on approval)", inline=False)
+    embed = discord.Embed(title=f"{EVENT.quest_post_prefix} — {title}", description=quest, color=COLOR_PINK)
+    embed.add_field(name="Reward", value=f"**+{reward_items} {EGG_EMOJI}** (on approval)", inline=False)
     if bonus:
         embed.add_field(name="Bonus", value=bonus, inline=False)
     embed.add_field(
@@ -1723,7 +1844,7 @@ async def postquest(
     )
     embed.add_field(
         name="Participation Requirement",
-        value="Players must claim the event role first with **`/role`**.",
+        value=f"Players must claim the {EVENT.display_name} role first with **`/role`**.",
         inline=False,
     )
     if dur_val != "none":
@@ -1749,21 +1870,21 @@ async def postquest(
         title=title,
         body=quest,
         bonus=bonus,
-        reward_envelopes=reward_envelopes,
+        reward_envelopes=reward_items,
         image_url=image_url,
         message_id=msg.id,
         channel_id=msg.channel.id,
         expires_at=expires_at,
     )
 
-    embed.title = f"🐣 Quest #{quest_id} — {title}"
+    embed.title = f"{EVENT.quest_emoji} Quest #{quest_id} — {title}"
     embed.add_field(name="Quest ID", value=str(quest_id), inline=True)
     if expires_at:
         embed.add_field(name="Auto-Close", value=dur_val, inline=True)
     await msg.edit(embed=embed)
 
     link = msg_link(interaction.guild.id, msg.channel.id, msg.id)
-    await log_ledger(interaction.guild, f"📌 QUEST POSTED • Quest#{quest_id} • +{reward_envelopes}{EGG_EMOJI} • by {interaction.user.mention} • {link}")
+    await log_ledger(interaction.guild, f"📌 QUEST POSTED • Quest#{quest_id} • +{reward_items}{EGG_EMOJI} • by {interaction.user.mention} • {link}")
     await interaction.followup.send(f"✅ Posted Quest **#{quest_id}** in {ch.mention}.", ephemeral=True)
 
 
@@ -1870,69 +1991,69 @@ async def revoke(interaction: discord.Interaction, submission_id: int):
     except Exception:
         pass
 
-    envelopes, points, crests = await get_user_stats(int(user_id))
+    envelopes, points, special_tokens = await get_user_stats(int(user_id))
     link = msg_link(interaction.guild.id, int(channel_id), int(message_id)) if interaction.guild and channel_id and message_id else "(link unavailable)"
 
     if removed:
         text_out = (
             f"✅ Revoked submission **#{submission_id}**.\n"
-            f"➖ Removed **{remove_amount} Blessed Egg(s)** from <@{user_id}>.\n"
-            f"Now: {EGG_EMOJI} **{envelopes}** | ⭐ **{points}** | {CREST_EMOJI} **{crests}**"
+            f"➖ Removed **{remove_amount} {item_name(1)}(s)** from <@{user_id}>.\n"
+            f"Now: {format_stat_bar(envelopes, points, special_tokens)}"
         )
         await log_ledger(interaction.guild, f"🧹 REVOKED • Sub#{sid} • -{remove_amount}{EGG_EMOJI} → <@{user_id}> • IGG `{igg_id}` • by {interaction.user.mention} • {link}")
     else:
         text_out = (
             f"✅ Revoked submission **#{submission_id}**.\n"
-            f"⚠️ Could NOT remove **{remove_amount} Blessed Egg(s)** (likely already spent).\n"
+            f"⚠️ Could NOT remove **{remove_amount} {item_name(1)}(s)** (likely already spent).\n"
             f"Please use adjust commands if needed.\n"
-            f"Now: {EGG_EMOJI} **{envelopes}** | ⭐ **{points}** | {CREST_EMOJI} **{crests}**"
+            f"Now: {format_stat_bar(envelopes, points, special_tokens)}"
         )
         await log_ledger(interaction.guild, f"🧹 REVOKED • Sub#{sid} • eggs NOT removed → <@{user_id}> • IGG `{igg_id}` • by {interaction.user.mention} • {link}")
 
     await interaction.response.send_message(text_out, ephemeral=True)
 
 
-@bot.tree.command(name="adjustpoints", description="(Staff) Adjust a user's Fortune Points (+/-). Clamped at 0.")
+@bot.tree.command(name="adjustpoints", description=f"(Staff) Adjust a user's {EVENT.points_label} (+/-). Clamped at 0.")
 @guild_only()
 @app_commands.describe(user="Target user", amount="Use negative to subtract (e.g., -4)")
 async def adjustpoints(interaction: discord.Interaction, user: discord.Member, amount: int):
     if not is_staff(interaction.user):
         return await interaction.response.send_message("Staff only.", ephemeral=True)
     before, after = await adjust_user_field(user.id, "points", amount)
-    envelopes, points, crests = await get_user_stats(user.id)
+    envelopes, points, special_tokens = await get_user_stats(user.id)
     await log_ledger(interaction.guild, f"🛠️ ADJUST • points {before}->{after} (Δ{amount}) • {user.mention} by {interaction.user.mention}")
     await interaction.response.send_message(
-        f"✅ Points updated for {user.mention}: **{before} → {after}**\nNow: {EGG_EMOJI} **{envelopes}** | ⭐ **{points}** | {CREST_EMOJI} **{crests}**",
+        f"✅ Points updated for {user.mention}: **{before} → {after}**\nNow: {format_stat_bar(envelopes, points, special_tokens)}",
         ephemeral=True,
     )
 
 
-@bot.tree.command(name="adjustenvelopes", description="(Staff) Adjust a user's Blessed Eggs (+/-). Clamped at 0.")
+@bot.tree.command(name="adjustitems", description=f"(Staff) Adjust a user's {EVENT.item_plural} (+/-). Clamped at 0.")
 @guild_only()
 @app_commands.describe(user="Target user", amount="Use negative to subtract (e.g., -1)")
-async def adjustenvelopes(interaction: discord.Interaction, user: discord.Member, amount: int):
+async def adjustitems(interaction: discord.Interaction, user: discord.Member, amount: int):
     if not is_staff(interaction.user):
         return await interaction.response.send_message("Staff only.", ephemeral=True)
     before, after = await adjust_user_field(user.id, "envelopes", amount)
-    envelopes, points, crests = await get_user_stats(user.id)
+    envelopes, points, special_tokens = await get_user_stats(user.id)
     await log_ledger(interaction.guild, f"🛠️ ADJUST • eggs {before}->{after} (Δ{amount}) • {user.mention} by {interaction.user.mention}")
     await interaction.response.send_message(
-        f"✅ Blessed Eggs updated for {user.mention}: **{before} → {after}**\nNow: {EGG_EMOJI} **{envelopes}** | ⭐ **{points}** | {CREST_EMOJI} **{crests}**",
+        f"✅ {item_name()} updated for {user.mention}: **{before} → {after}**\nNow: {format_stat_bar(envelopes, points, special_tokens)}",
         ephemeral=True,
     )
 
 
-@bot.tree.command(name="adjustdragon", description="(Staff) Adjust a user's Golden Crests (+/-). Clamped at 0.")
+@bot.tree.command(name="adjustspecial", description=f"(Staff) Adjust a user's {EVENT.special_plural} (+/-). Clamped at 0.")
 @guild_only()
 @app_commands.describe(user="Target user", amount="Use negative to subtract (e.g., -1)")
-async def adjustdragon(interaction: discord.Interaction, user: discord.Member, amount: int):
+async def adjustspecial(interaction: discord.Interaction, user: discord.Member, amount: int):
     if not is_staff(interaction.user):
         return await interaction.response.send_message("Staff only.", ephemeral=True)
-    before, after = await adjust_user_field(user.id, "dragon", amount)
-    envelopes, points, crests = await get_user_stats(user.id)
-    await log_ledger(interaction.guild, f"🛠️ ADJUST • crests {before}->{after} (Δ{amount}) • {user.mention} by {interaction.user.mention}")
+    before, after = await adjust_user_field(user.id, "special_tokens", amount)
+    envelopes, points, special_tokens = await get_user_stats(user.id)
+    await log_ledger(interaction.guild, f"🛠️ ADJUST • special_tokens {before}->{after} (Δ{amount}) • {user.mention} by {interaction.user.mention}")
     await interaction.response.send_message(
-        f"✅ Golden Crests updated for {user.mention}: **{before} → {after}**\nNow: {EGG_EMOJI} **{envelopes}** | ⭐ **{points}** | {CREST_EMOJI} **{crests}**",
+        f"✅ {special_name()} updated for {user.mention}: **{before} → {after}**\nNow: {format_stat_bar(envelopes, points, special_tokens)}",
         ephemeral=True,
     )
 
