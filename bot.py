@@ -28,7 +28,7 @@ STAFF_ROLE_ID = int(os.getenv("STAFF_ROLE_ID", "0"))
 DB_PATH = os.getenv("DB_PATH", "event.db")
 OWNER_USER_ID = int(os.getenv("OWNER_USER_ID", "736938613903720458"))
 EVENT_ROLE_ID = int(os.getenv("EVENT_ROLE_ID", "1470440988748156992"))
-EVENT_THEME = os.getenv("EVENT_THEME", "easter").strip().lower()
+EVENT_THEME = os.getenv("EVENT_THEME", "world_cup").strip().lower()
 
 # Generic thumbnail env names with backward-compatible fallbacks.
 OPEN_THUMBNAIL_COMMON = os.getenv("OPEN_THUMBNAIL_COMMON", os.getenv("OPEN_THUMBNAIL_GREEN", "")).strip()
@@ -149,10 +149,77 @@ def build_easter_profile() -> EventProfile:
     )
 
 
+def build_world_cup_profile() -> EventProfile:
+    return EventProfile(
+        key="world_cup",
+        display_name="World Cup",
+        footer_text="Developed by Neo",
+        entry_title="🏆 World Cup Entry Required",
+        welcome_title="⚽ Welcome to the World Cup Event",
+        submission_title="⚽ World Cup Quest Submission (Staff Review)",
+        open_title="🎁 Fan Pack Opened!",
+        claim_title="⚽ World Cup Claim Received",
+        balance_title="⚽ Your World Cup Locker",
+        leaderboard_title="🏆 World Cup Leaderboard",
+        rank_title="📊 World Cup Rank",
+        quest_post_prefix="🏟️ New World Cup Quest",
+        event_emoji="⚽",
+        points_emoji="🥅",
+        item_emoji="🎟️",
+        special_emoji="🏆",
+        quest_emoji="⚽",
+        helper_emoji="📣",
+        blossom_emoji="🏟️",
+        item_singular="Fan Pack",
+        item_plural="Fan Packs",
+        points_label="Cup Points",
+        special_singular="Golden Trophy",
+        special_plural="Golden Trophies",
+        primary_color=0x1E8E5A,
+        highlight_color=0xD4AF37,
+        neutral_color=0x808080,
+        success_color=0x2ECC71,
+        tiers=(
+            TierDefinition("common", "🎟️ Match Ticket", 55, 1, False),
+            TierDefinition("uncommon", "⚽ Supporter Kit", 30, 2, False),
+            TierDefinition("rare", "🥅 Victory Crate", 12, 4, False),
+            TierDefinition("special", "🏆 Golden Trophy", 3, 8, True),
+        ),
+        flavor={
+            "common": [
+                "A match ticket lands in your hands and the tournament journey begins.",
+                "The crowd roars as a small World Cup reward comes your way.",
+                "A steady start keeps your season moving forward.",
+                "Every campaign begins with one good touch—this is yours.",
+            ],
+            "uncommon": [
+                "Your supporter's kit arrives with stronger momentum.",
+                "The stadium lights shine a little brighter for you today.",
+                "A better reward joins your run through the tournament.",
+                "The crowd energy rises and so does your fortune.",
+            ],
+            "rare": [
+                "A victory crate breaks open with a standout reward inside.",
+                "This round clearly went your way—something rare appears.",
+                "A big tournament moment turns into a valuable prize.",
+                "Momentum is building, and the rewards are getting stronger.",
+            ],
+            "special": [
+                "A golden trophy shines in your hands—the tournament honors your run.",
+                "You hit a championship moment and the reward says it all.",
+                "The stadium erupts as a golden trophy joins your collection.",
+                "This is a title-worthy pull—the World Cup spotlight is on you.",
+            ],
+        },
+    )
+
+
 EVENT_PROFILES = {
     "easter": build_easter_profile(),
+    "world_cup": build_world_cup_profile(),
+    "worldcup": build_world_cup_profile(),
 }
-EVENT = EVENT_PROFILES.get(EVENT_THEME, EVENT_PROFILES["easter"])
+EVENT = EVENT_PROFILES.get(EVENT_THEME, EVENT_PROFILES["world_cup"])
 
 # =========================
 # EVENT SETTINGS
@@ -461,6 +528,7 @@ async def ensure_user(db: aiosqlite.Connection, user_id: int):
         "INSERT OR IGNORE INTO users(user_id, envelopes, points, special_tokens) VALUES (?, 0, 0, 0)",
         (user_id,),
     )
+    await db.commit()
 
 
 async def add_envelopes(user_id: int, amount: int):
@@ -484,7 +552,7 @@ async def get_user_stats(user_id: int) -> tuple[int, int, int]:
             return int(row[0]), int(row[1]), int(row[2])
 
 
-async def consume_envelope_and_award(user_id: int, points: int, is_crest: bool) -> bool:
+async def consume_envelope_and_award(user_id: int, points: int, grants_special: bool) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
         await ensure_user(db, user_id)
         async with db.execute(
@@ -499,7 +567,7 @@ async def consume_envelope_and_award(user_id: int, points: int, is_crest: bool) 
             "UPDATE users SET envelopes = envelopes - 1, points = points + ? WHERE user_id = ?",
             (int(points), int(user_id)),
         )
-        if is_crest:
+        if grants_special:
             await db.execute(
                 "UPDATE users SET special_tokens = special_tokens + 1 WHERE user_id = ?",
                 (int(user_id),),
@@ -1050,7 +1118,7 @@ async def try_edit_quest_message_closed(bot: commands.Bot, quest_id: int, reason
         if msg.embeds:
             emb = msg.embeds[0]
         else:
-            emb = discord.Embed(title=f"🐣 Quest #{quest_id} — {q_title}", color=COLOR_GRAY)
+            emb = discord.Embed(title=f"{EVENT.quest_emoji} Quest #{quest_id} — {q_title}", color=COLOR_GRAY)
 
         emb = mark_quest_embed_closed(emb, reason=reason)
         try:
@@ -1117,6 +1185,8 @@ class ReviewView(discord.ui.View):
 
     @discord.ui.button(label="Approve ✅", style=discord.ButtonStyle.success, row=0)
     async def approve(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        if not is_staff(interaction.user):
+            return await interaction.response.send_message("Staff only.", ephemeral=True)
         await handle_review_action(interaction=interaction, submission_id=self.submission_id, action="APPROVE", note=None)
 
     @discord.ui.button(label="Approve + Note 📝", style=discord.ButtonStyle.secondary, row=0)
@@ -1127,6 +1197,8 @@ class ReviewView(discord.ui.View):
 
     @discord.ui.button(label="Reject ❌", style=discord.ButtonStyle.danger, row=1)
     async def reject(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        if not is_staff(interaction.user):
+            return await interaction.response.send_message("Staff only.", ephemeral=True)
         await handle_review_action(interaction=interaction, submission_id=self.submission_id, action="REJECT", note=None)
 
     @discord.ui.button(label="Reject + Note 📝", style=discord.ButtonStyle.secondary, row=1)
@@ -1365,7 +1437,7 @@ class MilestoneView(discord.ui.View):
             )
 
         embed = discord.Embed(
-            title=f"🌸 Milestone Hall — {MILESTONE_TARGET}+ Approved Quests",
+            title=f"🏆 Milestone Hall — {MILESTONE_TARGET}+ Approved Quests",
             description="\n".join(lines) if lines else "No one has reached the milestone yet.",
             color=COLOR_GREEN,
         )
@@ -1441,7 +1513,7 @@ async def submit(
     image: discord.Attachment | None = None,
     text: str | None = None,
 ):
-    if interaction.channel_id != SUBMISSIONS_CHANNEL_ID:
+    if SUBMISSIONS_CHANNEL_ID != 0 and interaction.channel_id != SUBMISSIONS_CHANNEL_ID:
         return await interaction.response.send_message("Use this command in the submissions channel.", ephemeral=True)
 
     if not interaction.guild:
@@ -1543,8 +1615,8 @@ async def submit(
 @bot.tree.command(name="open", description=f"Open 1 {EVENT.item_singular} and reveal your seasonal reward.")
 @guild_only()
 async def open_cmd(interaction: discord.Interaction):
-    if interaction.channel_id != ENVELOPES_CHANNEL_ID:
-        return await interaction.response.send_message("Use this command in the eggs channel.", ephemeral=True)
+    if ENVELOPES_CHANNEL_ID != 0 and interaction.channel_id != ENVELOPES_CHANNEL_ID:
+        return await interaction.response.send_message(f"Use this command in the {item_name().lower()} channel.", ephemeral=True)
 
     if not await ensure_participation_ready(interaction):
         return
@@ -1554,7 +1626,7 @@ async def open_cmd(interaction: discord.Interaction):
     if now - last < OPEN_COOLDOWN_SECONDS:
         wait = int(OPEN_COOLDOWN_SECONDS - (now - last))
         return await interaction.response.send_message(f"⏳ Slow down—try again in {wait}s.", ephemeral=True)
-    open_cooldowns[interaction.user.id] = now
+    
 
     envelopes, points, special_tokens = await get_user_stats(interaction.user.id)
     if envelopes <= 0:
@@ -1572,9 +1644,10 @@ async def open_cmd(interaction: discord.Interaction):
     if not ok:
         return await interaction.response.send_message(f"You have no {item_name()} {EGG_EMOJI}.", ephemeral=True)
 
+    open_cooldowns[interaction.user.id] = now
     envelopes2, points2, special_tokens2 = await get_user_stats(interaction.user.id)
     key = tier.key
-    text = random.choice(FLAVOR.get(key, ["A soft seasonal blessing finds its way to you."]))
+    text = random.choice(FLAVOR.get(key, ["A tournament reward finds its way to you."]))
     completed = await count_user_approved(interaction.user.id)
     milestone_summary, milestone_ladder = build_milestone_progress(completed)
 
@@ -1601,12 +1674,12 @@ async def open_cmd(interaction: discord.Interaction):
 
     await log_ledger(
         interaction.guild,
-        f"🎁 OPENED • {interaction.user.mention} → {tier_name} (+{tier_points} pts) • eggs now {envelopes2}",
+        f"🎁 OPENED • {interaction.user.mention} → {tier_name} (+{tier_points} pts) • {item_name().lower()} now {envelopes2}",
     )
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="claim", description=f"Claim free {EVENT.item_plural} (6h cooldown, 1-4 eggs).")
+@bot.tree.command(name="claim", description=f"Claim free {EVENT.item_plural} (6h cooldown, 1-4 packs).")
 @guild_only()
 async def claim(interaction: discord.Interaction):
     if not await ensure_participation_ready(interaction):
@@ -1738,9 +1811,9 @@ async def role(interaction: discord.Interaction):
     embed = discord.Embed(
         title=EVENT.welcome_title,
         description=(
-            f"You now hold {role_obj.mention}. The Easter trail is open to you."
+            f"You now hold {role_obj.mention}. The World Cup event is now open to you."
             if not already_has else
-            f"You already hold {role_obj.mention}. The Easter trail is still open to you."
+            f"You already hold {role_obj.mention}. The World Cup event is still open to you."
         ),
         color=COLOR_GREEN,
     )
@@ -1957,7 +2030,7 @@ async def unlinkigg_cmd(interaction: discord.Interaction, user: discord.Member):
     await interaction.response.send_message(f"✅ Unlinked **`{old}`** from {user.mention}.", ephemeral=True)
 
 
-@bot.tree.command(name="revoke", description="(Staff) Revoke an approved submission (removes awarded eggs if possible).")
+@bot.tree.command(name="revoke", description=f"(Staff) Revoke an approved submission (removes awarded {item_name().lower()} if possible).")
 @guild_only()
 @app_commands.describe(submission_id="Submission ID number (e.g. 12)")
 async def revoke(interaction: discord.Interaction, submission_id: int):
@@ -1974,10 +2047,12 @@ async def revoke(interaction: discord.Interaction, submission_id: int):
     if status != "APPROVED":
         return await interaction.response.send_message(f"Only APPROVED submissions can be revoked. Current: {status}", ephemeral=True)
 
+    # Keep the previously awarded item count recorded while marking this submission as revoked.
     await finalize_submission_review(int(submission_id), "REVOKED", f"Revoked by {interaction.user}", int(interaction.user.id), reward_envelopes_awarded=int(awarded or 0))
     remove_amount = int(awarded or 0)
     removed = await try_remove_envelopes(int(user_id), remove_amount)
 
+    msg = None
     try:
         if interaction.guild and channel_id and message_id:
             ch = interaction.guild.get_channel(int(channel_id))
@@ -1992,7 +2067,7 @@ async def revoke(interaction: discord.Interaction, submission_id: int):
         pass
 
     envelopes, points, special_tokens = await get_user_stats(int(user_id))
-    link = msg_link(interaction.guild.id, int(channel_id), int(message_id)) if interaction.guild and channel_id and message_id else "(link unavailable)"
+    link = msg_link(interaction.guild.id, int(channel_id), int(message_id)) if (interaction.guild and channel_id and message_id and msg) else "(link unavailable)"
 
     if removed:
         text_out = (
@@ -2008,7 +2083,7 @@ async def revoke(interaction: discord.Interaction, submission_id: int):
             f"Please use adjust commands if needed.\n"
             f"Now: {format_stat_bar(envelopes, points, special_tokens)}"
         )
-        await log_ledger(interaction.guild, f"🧹 REVOKED • Sub#{sid} • eggs NOT removed → <@{user_id}> • IGG `{igg_id}` • by {interaction.user.mention} • {link}")
+        await log_ledger(interaction.guild, f"🧹 REVOKED • Sub#{sid} • {item_name().lower()} NOT removed → <@{user_id}> • IGG `{igg_id}` • by {interaction.user.mention} • {link}")
 
     await interaction.response.send_message(text_out, ephemeral=True)
 
@@ -2036,7 +2111,7 @@ async def adjustitems(interaction: discord.Interaction, user: discord.Member, am
         return await interaction.response.send_message("Staff only.", ephemeral=True)
     before, after = await adjust_user_field(user.id, "envelopes", amount)
     envelopes, points, special_tokens = await get_user_stats(user.id)
-    await log_ledger(interaction.guild, f"🛠️ ADJUST • eggs {before}->{after} (Δ{amount}) • {user.mention} by {interaction.user.mention}")
+    await log_ledger(interaction.guild, f"🛠️ ADJUST • {item_name().lower()} {before}->{after} (Δ{amount}) • {user.mention} by {interaction.user.mention}")
     await interaction.response.send_message(
         f"✅ {item_name()} updated for {user.mention}: **{before} → {after}**\nNow: {format_stat_bar(envelopes, points, special_tokens)}",
         ephemeral=True,
@@ -2090,6 +2165,9 @@ async def reset(interaction: discord.Interaction, confirm: str):
 @bot.event
 async def on_ready():
     await init_db()
+
+    if STAFF_ROLE_ID == 0:
+        print("⚠️ WARNING: STAFF_ROLE_ID is 0. Staff-only actions will be blocked until .env is configured.")
 
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT submission_id FROM submissions WHERE status = 'PENDING'") as cur:
